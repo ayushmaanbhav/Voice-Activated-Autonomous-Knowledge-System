@@ -47,6 +47,7 @@ impl Default for WebSocketConfig {
 /// Note: This is a stub implementation. The actual WebSocket transport
 /// is implemented in the server crate. This module provides the trait
 /// interface for consistency.
+#[allow(dead_code)]
 pub struct WebSocketTransport {
     session_id: String,
     config: WebSocketConfig,

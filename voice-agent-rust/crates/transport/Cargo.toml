@@ -12,6 +12,9 @@ voice-agent-core.workspace = true
 # WebRTC
 webrtc = "0.11"
 
+# Audio codec
+audiopus = "0.3.0-rc.0"
+
 # Async
 tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
@@ -27,6 +30,7 @@ thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
 uuid = { version = "1.6", features = ["v4", "serde"] }
+bytes = "1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

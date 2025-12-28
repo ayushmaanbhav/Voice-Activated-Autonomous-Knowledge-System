@@ -12,10 +12,12 @@ pub mod webrtc;
 pub mod websocket;
 pub mod traits;
 pub mod session;
+pub mod codec;
 
-pub use traits::{Transport, TransportEvent, AudioSink, AudioSource};
+pub use traits::{Transport, TransportEvent, AudioSink, AudioSource, ConnectionStats};
 pub use session::{TransportSession, SessionConfig};
-pub use webrtc::{WebRtcTransport, WebRtcConfig, IceServer};
+pub use webrtc::{WebRtcTransport, WebRtcConfig, IceServer, WebRtcAudioSink, WebRtcAudioSource, WebRtcState};
+pub use codec::{OpusEncoder, OpusDecoder, Resampler};
 
 use thiserror::Error;
 

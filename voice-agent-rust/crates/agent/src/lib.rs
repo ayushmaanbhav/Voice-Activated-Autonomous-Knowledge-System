@@ -6,18 +6,21 @@
 //! - Conversation memory (hierarchical)
 //! - Tool orchestration
 //! - Persona-aware response generation
+//! - Voice session integration with STT/TTS
 
 pub mod conversation;
 pub mod memory;
 pub mod stage;
 pub mod intent;
 pub mod agent;
+pub mod voice_session;
 
 pub use conversation::{Conversation, ConversationConfig, ConversationEvent};
 pub use memory::{ConversationMemory, MemoryConfig, MemoryEntry};
 pub use stage::{StageManager, ConversationStage, StageTransition};
 pub use intent::{IntentDetector, Intent, Slot, DetectedIntent};
 pub use agent::{GoldLoanAgent, AgentConfig, AgentEvent};
+pub use voice_session::{VoiceSession, VoiceSessionConfig, VoiceSessionState, VoiceSessionEvent};
 
 use thiserror::Error;
 

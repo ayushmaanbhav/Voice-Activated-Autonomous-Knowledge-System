@@ -1,0 +1,124 @@
+# Gold Loan Domain Vocabulary
+# Used for entity boosting in STT decoding
+
+# Bank names
+kotak mahindra
+kotak
+muthoot
+manappuram
+iifl
+hdfc
+icici
+sbi
+pnb
+
+# Products
+gold loan
+gold loans
+swarna loan
+jewel loan
+suraksha gold loan
+personal gold loan
+
+# Hindi terms (Devanagari)
+गोल्ड लोन
+सोने का लोन
+स्वर्ण ऋण
+गहने का लोन
+
+# Hindi terms (Romanized)
+sona
+sone ka loan
+sone pe loan
+gehne
+gehne ka loan
+
+# Financial terms
+interest rate
+processing fee
+tenure
+emi
+loan amount
+principal
+ltv
+loan to value
+foreclosure
+prepayment
+
+# Hindi financial terms
+byaaj dar
+rashi
+kist
+avadhi
+mulya
+keemat
+
+# Branch related
+branch
+nearest branch
+appointment
+time slot
+door step
+doorstep
+home service
+
+# Hindi branch terms
+shakha
+samay
+mulakat
+ghar par seva
+
+# Gold related
+gold
+jewelry
+jewellery
+ornaments
+24 karat
+22 karat
+purity
+weight
+gram
+grams
+tola
+
+# Hindi gold terms
+sona
+chandi
+zewar
+kundan
+aabhushan
+vajan
+shudhta
+
+# Actions
+apply
+check
+calculate
+transfer
+switch
+balance transfer
+top up
+
+# Hindi actions
+apply karna
+check karna
+jama karna
+transfer karna
+
+# Numbers (Hindi)
+ek lakh
+do lakh
+paanch lakh
+das lakh
+pachaas hazaar
+sau
+hazaar
+
+# Common phrases
+mujhe gold loan chahiye
+gold loan lena hai
+interest rate kya hai
+kitna milega
+processing fee kitni hai
+branch kahan hai
+appointment book karna hai

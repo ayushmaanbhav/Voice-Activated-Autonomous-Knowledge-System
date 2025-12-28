@@ -6,9 +6,11 @@
 
 mod streaming;
 mod decoder;
+mod vocab;
 
 pub use streaming::{StreamingStt, SttConfig, SttEngine};
 pub use decoder::{EnhancedDecoder, DecoderConfig};
+pub use vocab::{Vocabulary, load_vocabulary, load_domain_vocab};
 
 use crate::PipelineError;
 use voice_agent_core::TranscriptResult;

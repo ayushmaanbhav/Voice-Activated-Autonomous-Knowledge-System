@@ -62,6 +62,9 @@ pub enum PipelineError {
 
     #[error("Audio error: {0}")]
     Audio(String),
+
+    #[error("IO error: {0}")]
+    Io(String),
 }
 
 /// P2 FIX: Properly map each pipeline error variant to its corresponding core variant.
@@ -80,6 +83,7 @@ impl From<PipelineError> for voice_agent_core::Error {
             PipelineError::Timeout => CorePipelineError::Timeout(0),
             PipelineError::NotInitialized => CorePipelineError::NotInitialized,
             PipelineError::Audio(msg) => CorePipelineError::Vad(format!("Audio: {}", msg)),
+            PipelineError::Io(msg) => CorePipelineError::Stt(format!("IO: {}", msg)),
         };
 
         voice_agent_core::Error::Pipeline(core_err)

@@ -43,6 +43,10 @@ pub struct SttConfig {
     pub partial_interval: usize,
     /// Decoder configuration
     pub decoder: DecoderConfig,
+    /// Model directory for vocab loading
+    pub model_dir: Option<std::path::PathBuf>,
+    /// Domain vocabulary file (entity boosting)
+    pub domain_vocab_path: Option<std::path::PathBuf>,
 }
 
 impl Default for SttConfig {
@@ -55,6 +59,8 @@ impl Default for SttConfig {
             enable_partials: true,
             partial_interval: 10,
             decoder: DecoderConfig::default(),
+            model_dir: None,
+            domain_vocab_path: None,
         }
     }
 }
@@ -134,17 +140,16 @@ impl StreamingStt {
     /// Load vocabulary for engine
     #[allow(dead_code)]
     fn load_vocab(engine: &SttEngine) -> Result<Vec<String>, PipelineError> {
-        match engine {
-            SttEngine::Whisper => {
-                Ok((0..51865).map(|i| format!("<{}>", i)).collect())
-            }
-            SttEngine::IndicConformer => {
-                Ok((0..8000).map(|i| format!("<{}>", i)).collect())
-            }
-            SttEngine::Wav2Vec2 => {
-                Ok("abcdefghijklmnopqrstuvwxyz' ".chars().map(|c| c.to_string()).collect())
-            }
-        }
+        // Use the proper vocabulary loader
+        super::vocab::load_vocabulary(engine, None)
+            .map(|v| v.into_tokens())
+    }
+
+    /// Load vocabulary from model directory
+    #[allow(dead_code)]
+    fn load_vocab_from_dir(engine: &SttEngine, model_dir: &std::path::Path) -> Result<Vec<String>, PipelineError> {
+        super::vocab::load_vocabulary(engine, Some(model_dir))
+            .map(|v| v.into_tokens())
     }
 
     /// Get chunk size in samples
