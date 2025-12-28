@@ -1,0 +1,10 @@
+{
+    "language": "hi",
+    "phoneme_set": "ipa",
+    "mappings": {
+        "schwa_deletion": true,
+        "nukta_handling": true,
+        "gemination": true
+    },
+    "rules_file": "hindi_g2p_rules.txt"
+}

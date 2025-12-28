@@ -2,3 +2,15 @@
 	path = voice-agent/backend/ai4bharat-nemo
 	url = https://github.com/AI4Bharat/NeMo.git
 	branch = nemo-v2
+[submodule "voice-agent-rust/scripts/F5-TTS-ONNX"]
+	path = voice-agent-rust/scripts/F5-TTS-ONNX
+	url = https://github.com/DakeQQ/F5-TTS-ONNX.git
+[submodule "voice-agent-rust/models/stt/indic-seamless"]
+	path = voice-agent-rust/models/stt/indic-seamless
+	url = git@hf.co:ai4bharat/indic-seamless
+[submodule "voice-agent-rust/models/stt/indicconformer"]
+	path = voice-agent-rust/models/stt/indicconformer
+	url = git@hf.co:ai4bharat/indic-conformer-600m-multilingual
+[submodule "voice-agent-rust/models/tts/IndicF5"]
+	path = voice-agent-rust/models/tts/IndicF5
+	url = git@hf.co:ai4bharat/IndicF5
