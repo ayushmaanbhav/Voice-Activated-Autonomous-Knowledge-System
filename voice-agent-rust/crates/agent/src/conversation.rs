@@ -384,6 +384,11 @@ impl Conversation {
         &self.memory
     }
 
+    /// P1 FIX: Get memory Arc for async operations
+    pub fn memory_arc(&self) -> Arc<ConversationMemory> {
+        Arc::clone(&self.memory)
+    }
+
     /// Get stage manager reference
     pub fn stage_manager(&self) -> &StageManager {
         &self.stage_manager

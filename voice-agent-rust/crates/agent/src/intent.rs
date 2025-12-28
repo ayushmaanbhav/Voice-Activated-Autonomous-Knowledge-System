@@ -606,4 +606,80 @@ mod tests {
         let result = detector.detect("Hello");
         assert_eq!(result.intent, "greeting");
     }
+
+    #[test]
+    fn test_loan_amount_extraction_lakh() {
+        let detector = IntentDetector::new();
+
+        let slots = detector.extract_slots("I need a loan of 5 lakh rupees");
+        assert!(slots.contains_key("loan_amount"));
+        assert_eq!(slots.get("loan_amount").unwrap().value, Some("500000".to_string()));
+    }
+
+    #[test]
+    fn test_loan_amount_extraction_crore() {
+        let detector = IntentDetector::new();
+
+        let slots = detector.extract_slots("I want 1.5 crore loan");
+        assert!(slots.contains_key("loan_amount"));
+        assert_eq!(slots.get("loan_amount").unwrap().value, Some("15000000".to_string()));
+    }
+
+    #[test]
+    fn test_gold_weight_extraction() {
+        let detector = IntentDetector::new();
+
+        let slots = detector.extract_slots("I have 50 grams of gold");
+        assert!(slots.contains_key("gold_weight"));
+        assert_eq!(slots.get("gold_weight").unwrap().value, Some("50".to_string()));
+    }
+
+    #[test]
+    fn test_gold_purity_extraction() {
+        let detector = IntentDetector::new();
+
+        let slots = detector.extract_slots("It is 22 karat gold");
+        assert!(slots.contains_key("gold_purity"));
+        assert_eq!(slots.get("gold_purity").unwrap().value, Some("22K".to_string()));
+    }
+
+    #[test]
+    fn test_phone_extraction() {
+        let detector = IntentDetector::new();
+
+        let slots = detector.extract_slots("My number is 9876543210");
+        assert!(slots.contains_key("phone"));
+        assert_eq!(slots.get("phone").unwrap().value, Some("9876543210".to_string()));
+    }
+
+    #[test]
+    fn test_location_extraction() {
+        let detector = IntentDetector::new();
+
+        let slots = detector.extract_slots("I am from Mumbai");
+        assert!(slots.contains_key("location"));
+        // Regex captures as-is from text
+        assert_eq!(slots.get("location").unwrap().value, Some("Mumbai".to_string()));
+    }
+
+    #[test]
+    fn test_multiple_lenders() {
+        let detector = IntentDetector::new();
+
+        let slots1 = detector.extract_slots("I have a loan from Manappuram");
+        assert_eq!(slots1.get("current_lender").unwrap().value, Some("Manappuram".to_string()));
+
+        let slots2 = detector.extract_slots("My loan is with IIFL");
+        assert_eq!(slots2.get("current_lender").unwrap().value, Some("IIFL".to_string()));
+    }
+
+    #[test]
+    fn test_tola_to_grams() {
+        let detector = IntentDetector::new();
+
+        let slots = detector.extract_slots("I have 10 tola gold");
+        assert!(slots.contains_key("gold_weight"));
+        // 10 tola = 116.6 grams (truncated to 116)
+        assert_eq!(slots.get("gold_weight").unwrap().value, Some("116".to_string()));
+    }
 }

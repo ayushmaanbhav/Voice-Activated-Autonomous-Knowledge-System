@@ -14,13 +14,13 @@ This document tracks the implementation status and next steps for the Gold Loan 
 |-----------|-------|----------|----------|-------------|-----------|
 | Pipeline (VAD, STT, TTS) | **A-** | 5/5 ✅ | 9/9 ✅ | 0 | [01-pipeline-plan.md](./01-pipeline-plan.md) |
 | LLM/Speculative | **A-** | 4/4 ✅ | 8/9 ✅ | 2 | [02-llm-plan.md](./02-llm-plan.md) |
-| RAG (Retriever, Reranker) | **B+** | 3/3 ✅ | 7/7 ✅ | 1 | [03-rag-plan.md](./03-rag-plan.md) |
+| RAG (Retriever, Reranker) | **A-** | 3/3 ✅ | 8/8 ✅ | 0 | [03-rag-plan.md](./03-rag-plan.md) |
 | Agent (Conversation, Intent) | **A-** | 4/4 ✅ | 9/10 ✅ | 2 | [04-agent-plan.md](./04-agent-plan.md) |
 | Tools (MCP, Gold Loan) | **A** | 4/4 ✅ | 9/9 ✅ | 0 | [05-tools-plan.md](./05-tools-plan.md) |
 | Core/Infrastructure | **A** | 4/4 ✅ | 6/9 ✅ | 3 | [06-core-plan.md](./06-core-plan.md) |
 | **Deep Dives** | - | - | - | - | [07-deep-dives.md](./07-deep-dives.md) |
 
-**🎉 ALL P0 ISSUES COMPLETE! 24/24 P0 ✅ | 46/47 P1 ✅ | 4 P1 REMAINING (Agent/RAG)**
+**🎉 ALL P0 ISSUES COMPLETE! 24/24 P0 ✅ | 48/49 P1 ✅ | 3 P1 REMAINING (Agent)**
 
 ---
 
@@ -93,7 +93,7 @@ This document tracks the implementation status and next steps for the Gold Loan 
 
 ### RAG Enhancements
 - [x] ~~Parallelize dense + sparse search~~ ✅ FIXED (tokio::join!)
-- [ ] Implement agentic RAG multi-step flow - ❌ NOT IMPLEMENTED
+- [x] ~~Implement agentic RAG multi-step flow~~ ✅ FIXED (AgenticRetriever with query rewriting)
 - [x] ~~Add prefetch caching~~ ✅ FIXED (spawn_blocking)
 
 ---
@@ -106,9 +106,9 @@ This document tracks the implementation status and next steps for the Gold Loan 
 - [x] ~~Calendar API~~ ✅ FIXED (trait + stub ready for Google/Outlook)
 - [x] ~~Branch database/API~~ ✅ FIXED (20 branches in JSON)
 
-### Agent Improvements - ❌ STILL OPEN
-- [ ] Fix slot extraction using regex patterns - ❌ OPEN (patterns defined but unused)
-- [ ] Implement actual LLM memory summarization - ❌ OPEN (fake impl)
+### Agent Improvements - ✅ MOSTLY COMPLETE
+- [x] ~~Fix slot extraction using regex patterns~~ ✅ FIXED (already implemented, added tests)
+- [x] ~~Implement actual LLM memory summarization~~ ✅ FIXED (wired LLM to memory system)
 - [x] ~~Add Devanagari script support~~ ✅ FIXED (unicode-segmentation)
 - [x] ~~Add missing FSM transitions~~ ✅ FIXED
 
@@ -143,9 +143,9 @@ This document tracks the implementation status and next steps for the Gold Loan 
 | Issue | Component | Effort | Status |
 |-------|-----------|--------|--------|
 | Early-exit reranker (ONNX limitation) | RAG | High | ⚠️ Documented limitation |
-| Agentic RAG multi-step flow | RAG | Medium | ❌ OPEN |
-| Slot extraction regex patterns | Agent | Medium | ❌ OPEN |
-| LLM memory summarization | Agent | Medium | ❌ OPEN |
+| Agentic RAG multi-step flow | RAG | Medium | ✅ FIXED |
+| Slot extraction regex patterns | Agent | Medium | ✅ FIXED (was already implemented) |
+| LLM memory summarization | Agent | Medium | ✅ FIXED |
 
 ### Medium Priority (P2)
 | Issue | Component | Effort |

@@ -14,6 +14,7 @@ candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:sa
 [dependencies]
 voice-agent-core.workspace = true
 voice-agent-config.workspace = true
+voice-agent-llm.workspace = true
 
 # Async
 tokio = { workspace = true, features = ["sync", "time"] }

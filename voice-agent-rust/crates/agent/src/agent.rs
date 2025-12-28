@@ -142,6 +142,11 @@ impl GoldLoanAgent {
             None
         };
 
+        // P1 FIX: Wire LLM to memory for real summarization
+        if let Some(ref llm_backend) = llm {
+            conversation.memory().set_llm(llm_backend.clone());
+        }
+
         Self {
             config,
             conversation,
@@ -177,6 +182,9 @@ impl GoldLoanAgent {
         } else {
             None
         };
+
+        // P1 FIX: Wire LLM to memory for real summarization
+        conversation.memory().set_llm(llm.clone());
 
         Self {
             config,
@@ -257,6 +265,15 @@ impl GoldLoanAgent {
 
         // Add assistant turn
         self.conversation.add_assistant_turn(&response)?;
+
+        // P1 FIX: Trigger memory summarization in background (non-blocking)
+        // This uses the LLM (if available) to summarize conversation history
+        let memory = self.conversation.memory_arc();
+        tokio::spawn(async move {
+            if let Err(e) = memory.summarize_pending_async().await {
+                tracing::debug!("Memory summarization skipped: {}", e);
+            }
+        });
 
         // Emit response event
         let _ = self.event_tx.send(AgentEvent::Response(response.clone()));

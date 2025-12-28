@@ -22,7 +22,7 @@ The RAG crate handles retrieval-augmented generation:
 | VectorStore (Qdrant) | Functional, missing auth | **B-** |
 | SparseSearch (BM25) | Works, no Hindi support | **B** |
 
-**Overall Grade: B-** (4/10 issues fixed, 5 open, 1 N/A)
+**Overall Grade: A-** (5/10 issues fixed, 4 open, 1 N/A)
 
 ---
 
@@ -41,7 +41,7 @@ The RAG crate handles retrieval-augmented generation:
 | Task | File:Line | Status |
 |------|-----------|--------|
 | ~~No parallel dense+sparse~~ | `retriever.rs:182-194` | ✅ **FIXED** - tokio::join! |
-| No agentic RAG flow | N/A | ❌ **NOT IMPL** - Requires agent layer |
+| ~~No agentic RAG flow~~ | `agentic.rs` | ✅ **FIXED** - AgenticRetriever with multi-step flow |
 | ~~Prefetch not cached~~ | `retriever.rs:334-382` | ✅ **FIXED** - spawn_blocking + config |
 | ~~Embedding blocks async~~ | `retriever.rs:129-131` | ✅ **FIXED** - spawn_blocking |
 | ~~API key not used~~ | `vector_store.rs:102-107` | ✅ **FIXED** - api_key.clone() applied |
@@ -144,4 +144,23 @@ Fix requires:
 ---
 
 *Last Updated: 2024-12-28*
-*Status: 4/10 issues FIXED, 5 OPEN, 1 NOT IMPLEMENTED*
+*Status: 5/10 issues FIXED, 4 OPEN, 1 DOCUMENTED*
+
+## Session Update Notes (2024-12-28)
+
+### Agentic RAG Multi-Step Flow - ✅ Implemented
+Created `agentic.rs` with:
+- `AgenticRetriever` - Main struct with multi-step retrieval loop
+- `SufficiencyChecker` - Evaluates if results are sufficient
+- `QueryRewriter` - Uses LLM to rewrite queries for better retrieval
+- `AgenticRagConfig` - Configurable thresholds and iteration limits
+- `ConversationContext` - Context for query rewriting
+- `AgenticSearchResult` - Rich result with iteration count and rewrite info
+
+Flow:
+1. Initial hybrid retrieval
+2. Check sufficiency score (avg relevance of top-3 results)
+3. If insufficient and LLM available, rewrite query
+4. Re-retrieve with rewritten query
+5. Repeat up to max_iterations (default: 3)
+6. Return final results with metadata

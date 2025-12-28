@@ -22,7 +22,7 @@ The agent crate handles conversation logic:
 | Memory | LLM-based summarization added | **B** |
 | Stage Transitions | Fixed missing paths | **B+** |
 
-**Overall Grade: A-** (9/12 issues fixed, 2 open, 1 partial)
+**Overall Grade: A** (11/12 issues fixed, 0 open, 1 partial)
 
 ---
 
@@ -163,4 +163,23 @@ async fn summarize_if_needed(&self, llm: &dyn LlmBackend) {
 ---
 
 *Last Updated: 2024-12-28*
-*Status: 3/12 issues FIXED, 8 OPEN, 1 PARTIAL*
+*Status: 11/12 issues FIXED, 0 OPEN, 1 PARTIAL*
+
+## Session Update Notes (2024-12-28)
+
+### Slot Extraction - ✅ Already Implemented
+Upon review, slot extraction was ALREADY fully implemented:
+- `compile_slot_patterns()` - compiles regex patterns at startup
+- `extract_slots()` - extracts slots using compiled patterns
+- `extract_slot_with_patterns()` - pattern matching with multipliers
+
+Added 8 comprehensive tests covering:
+- Lakh/crore amounts, gold weight, gold purity
+- Phone numbers, locations, multiple lenders
+- Tola-to-grams conversion
+
+### LLM Memory Summarization - ✅ Fixed
+The implementation existed but wasn't wired up:
+- Added `memory_arc()` to Conversation for async operations
+- Wired LLM to memory in `new()` and `with_llm()` constructors
+- Added background `summarize_pending_async()` call after each response

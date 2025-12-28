@@ -8,6 +8,7 @@
 //! - Candle BERT embeddings (native Rust inference)
 //! - FP16/BF16 quantization for reduced memory and faster inference
 //! - LRU embedding cache for repeated queries
+//! - P1 FIX: Agentic RAG multi-step retrieval flow
 
 pub mod embeddings;
 pub mod vector_store;
@@ -16,6 +17,7 @@ pub mod reranker;
 pub mod retriever;
 pub mod candle_embeddings;
 pub mod cache;
+pub mod agentic;
 
 pub use embeddings::{Embedder, EmbeddingConfig, SimpleEmbedder};
 pub use candle_embeddings::{
@@ -27,6 +29,10 @@ pub use vector_store::{VectorStore, VectorStoreConfig};
 pub use sparse_search::{SparseIndex, SparseConfig};
 pub use reranker::{EarlyExitReranker, RerankerConfig, ExitStrategy};
 pub use retriever::{HybridRetriever, RetrieverConfig, SearchResult};
+pub use agentic::{
+    AgenticRetriever, AgenticRagConfig, AgenticSearchResult,
+    ConversationContext, SufficiencyChecker, QueryRewriter,
+};
 
 use thiserror::Error;
 
