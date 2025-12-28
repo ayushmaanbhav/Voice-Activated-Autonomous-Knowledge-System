@@ -52,15 +52,16 @@ The LLM crate handles language model inference with speculative execution:
 
 ---
 
-## P2 - Nice to Have
+## P2 - Nice to Have (Updated 2024-12-28)
 
-| Task | File:Line | Description |
-|------|-----------|-------------|
-| Missing Claude/OpenAI Backends | `backend.rs:1-4` | Doc claims support but not implemented |
-| No Clone for OllamaBackend | `backend.rs:103` | Limits composability |
-| Statistics precision | `speculative.rs:533-534` | Use Welford's algorithm |
-| Unicode word boundaries | `streaming.rs:134` | TokenBuffer doesn't handle properly |
-| Missing Tool role | `prompt.rs:9-15` | No function calling support |
+| Task | File:Line | Status |
+|------|-----------|--------|
+| Missing Claude/OpenAI Backends | `backend.rs:1-4` | ❌ OPEN - Only Ollama implemented |
+| No Clone for OllamaBackend | `backend.rs:103` | ❌ OPEN - Limits composability |
+| Statistics precision | `speculative.rs:533-534` | ❌ OPEN - Use Welford's algorithm |
+| ~~Unicode word boundaries~~ | `streaming.rs:133-147` | ✅ FIXED - Hindi danda (।॥) support |
+| ~~Missing Tool role~~ | `prompt.rs:14-22` | ✅ FIXED - Role::Tool added |
+| ~~Token estimation for Hindi~~ | `prompt.rs:286-327` | ✅ FIXED - Devanagari detection |
 
 ---
 

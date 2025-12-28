@@ -55,15 +55,15 @@ The pipeline crate handles the real-time audio processing chain:
 
 ---
 
-## P2 - Nice to Have
+## P2 - Nice to Have (Updated 2024-12-28)
 
-| Task | File:Line | Description |
-|------|-----------|-------------|
-| Vec::remove(0) O(n) | `semantic.rs:282`, `decoder.rs:193` | Should use VecDeque |
-| Fake FFT in mel filterbank | `vad/magicnet.rs:400-416` | Band averaging, not real FFT |
-| Error type lost in conversion | `lib.rs:69` | All errors become Vad variant |
-| No parallel STT + Turn Detection | `orchestrator.rs:195-216` | Sequential when could be parallel |
-| parse_words() O(n^2) | `tts/chunker.rs:91-115` | String allocations per word |
+| Task | File:Line | Status |
+|------|-----------|--------|
+| ~~Vec::remove(0) O(n)~~ | `semantic.rs:88`, `decoder.rs:86` | ✅ FIXED - VecDeque with pop_front() |
+| Fake FFT in mel filterbank | `vad/magicnet.rs:400-416` | ❌ OPEN - Band averaging, not real FFT |
+| Error type lost in conversion | `lib.rs:69` | ❌ OPEN - All errors become Vad variant |
+| No parallel STT + Turn Detection | `orchestrator.rs:195-216` | ❌ OPEN - Sequential when could be parallel |
+| ~~parse_words() O(n²)~~ | `tts/chunker.rs:94-125` | ✅ FIXED - Two-pass O(n) with boundaries |
 
 ---
 

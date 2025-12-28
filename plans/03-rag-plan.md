@@ -50,23 +50,23 @@ The RAG crate handles retrieval-augmented generation:
 
 ---
 
-## P2 - Nice to Have
+## P2 - Nice to Have (Updated 2024-12-28)
 
-| Task | File:Line | Description |
-|------|-----------|-------------|
-| Hardcoded prefetch params | `retriever.rs:264-284` | Confidence/top_k should be configurable |
-| SimpleScorer too naive | `reranker.rs:366-388` | Jaccard similarity, not semantic |
-| SimpleEmbedder is hash-based | `embeddings.rs:225-231` | Only for testing |
-| Stats not updated | `reranker.rs:251-253` | exits_per_layer never populated |
-| Hardcoded output name | `embeddings.rs:169-171` | Assumes last_hidden_state |
+| Task | File:Line | Status |
+|------|-----------|--------|
+| ~~Hardcoded prefetch params~~ | `retriever.rs:264-284` | ✅ FIXED - Configurable via RetrieverConfig |
+| ~~SimpleScorer too naive~~ | `reranker.rs:606-722` | ✅ FIXED - TF-IDF with stopwords, position weighting |
+| SimpleEmbedder is hash-based | `embeddings.rs:225-231` | ⚠️ Expected - Only for testing |
+| Stats not updated | `reranker.rs:251-253` | ❌ OPEN - exits_per_layer never populated |
+| Hardcoded output name | `embeddings.rs:169-171` | ❌ OPEN - Assumes last_hidden_state |
 
 ---
 
 ## Agentic RAG Implementation Plan
 
-**DESIGN COMPLETE** - See [07-deep-dives.md](./07-deep-dives.md#q5-configurable-agentic-rag-architecture) for full implementation.
+**✅ IMPLEMENTED** - See `agentic.rs` for full implementation.
 
-The architecture doc specifies but is NOT implemented:
+The architecture has been implemented in `crates/rag/src/agentic.rs`:
 
 ```
 ┌─────────────────────────────────────────────────────────┐

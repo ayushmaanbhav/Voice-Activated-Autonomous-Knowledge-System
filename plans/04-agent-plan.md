@@ -52,15 +52,16 @@ The agent crate handles conversation logic:
 
 ---
 
-## P2 - Nice to Have
+## P2 - Nice to Have (Updated 2024-12-28)
 
-| Task | File:Line | Description |
-|------|-----------|-------------|
-| No Hindi word tokenization | `intent.rs:274-303` | split_whitespace doesn't handle Hindi |
-| Fragile amount extraction | `intent.rs:329-339` | Only handles "lakh" suffix |
-| Poor episodic summaries | `memory.rs:159-168` | Truncates at 50 chars mid-word |
-| Mock responses ignore language | `agent.rs:367-405` | Always Hinglish even if config.language is "en" |
-| No multi-turn slot filling | N/A | Can't ask follow-up for missing slots |
+| Task | File:Line | Status |
+|------|-----------|--------|
+| ~~No Hindi word tokenization~~ | `intent.rs` | ✅ FIXED - unicode-segmentation crate |
+| ~~Fragile amount extraction~~ | `intent.rs:329-400` | ✅ FIXED - Handles lakh/crore/hazar + Hindi numerals |
+| Poor episodic summaries | `memory.rs:159-168` | ⚠️ PARTIAL - truncate_at_word_boundary added |
+| ~~Mock responses ignore language~~ | `agent.rs:473-551` | ✅ FIXED - EN/HI based on config.language |
+| ~~Context window management~~ | `agent.rs:34,447` | ✅ FIXED - context_window_tokens + build_with_limit |
+| No multi-turn slot filling | N/A | ❌ OPEN - Can't ask follow-up for missing slots |
 
 ---
 
