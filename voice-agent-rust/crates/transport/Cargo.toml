@@ -1,0 +1,32 @@
+[package]
+name = "voice-agent-transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "WebRTC and WebSocket transport for voice agent"
+
+[dependencies]
+voice-agent-core.workspace = true
+
+# WebRTC
+webrtc = "0.11"
+
+# Async
+tokio = { workspace = true, features = ["full"] }
+tokio-stream.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+# Utilities
+thiserror.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
