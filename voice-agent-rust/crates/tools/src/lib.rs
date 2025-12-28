@@ -6,6 +6,7 @@
 pub mod mcp;
 pub mod registry;
 pub mod gold_loan;
+pub mod integrations;
 
 pub use mcp::{Tool, ToolInput, ToolOutput, ToolSchema, ToolError};
 pub use registry::{ToolRegistry, ToolExecutor};
@@ -15,6 +16,14 @@ pub use gold_loan::{
     LeadCaptureTool,
     AppointmentSchedulerTool,
     BranchLocatorTool,
+    BranchData,
+    get_branches,
+    reload_branches,
+};
+pub use integrations::{
+    CrmIntegration, StubCrmIntegration, CrmLead, LeadSource, LeadStatus, InterestLevel,
+    CalendarIntegration, StubCalendarIntegration, Appointment, AppointmentPurpose, AppointmentStatus, TimeSlot,
+    IntegrationError,
 };
 
 /// P2 FIX: Removed redundant ToolsError enum.

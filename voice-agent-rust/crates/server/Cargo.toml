@@ -41,5 +41,9 @@ parking_lot.workspace = true
 uuid = { version = "1.6", features = ["v4", "serde"] }
 base64 = "0.21"
 
+# Observability
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

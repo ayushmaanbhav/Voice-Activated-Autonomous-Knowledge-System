@@ -7,12 +7,14 @@ pub mod http;
 pub mod session;
 pub mod state;
 pub mod rate_limit;
+pub mod metrics;
 
 pub use websocket::WebSocketHandler;
 pub use http::create_router;
 pub use session::{Session, SessionManager};
 pub use state::AppState;
 pub use rate_limit::{RateLimiter, RateLimitError};
+pub use metrics::{init_metrics, record_request, record_stt_latency, record_llm_latency, record_tts_latency, record_total_latency, record_error};
 
 use thiserror::Error;
 

@@ -4,10 +4,134 @@
 
 use async_trait::async_trait;
 use chrono::{NaiveDate, Utc};
+use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::Path;
+use std::sync::RwLock;
 use voice_agent_config::GoldLoanConfig;
 
 use crate::mcp::{Tool, ToolSchema, ToolOutput, ToolError, InputSchema, PropertySchema};
+
+/// P0 FIX: Branch data structure for JSON loading
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchData {
+    pub branch_id: String,
+    pub name: String,
+    pub city: String,
+    pub area: String,
+    pub address: String,
+    #[serde(default)]
+    pub pincode: String,
+    pub phone: String,
+    pub gold_loan_available: bool,
+    pub timing: String,
+    #[serde(default)]
+    pub facilities: Vec<String>,
+}
+
+/// Branch data file structure
+#[derive(Debug, Deserialize)]
+struct BranchDataFile {
+    branches: Vec<BranchData>,
+}
+
+/// P0 FIX: Global branch data loaded from JSON
+static BRANCH_DATA: Lazy<RwLock<Vec<BranchData>>> = Lazy::new(|| {
+    // Try to load from default paths
+    let default_paths = [
+        "data/branches.json",
+        "../data/branches.json",
+        "../../data/branches.json",
+        "./branches.json",
+    ];
+
+    for path in &default_paths {
+        if let Ok(data) = load_branches_from_file(path) {
+            tracing::info!("Loaded {} branches from {}", data.len(), path);
+            return RwLock::new(data);
+        }
+    }
+
+    // Fall back to embedded default data
+    tracing::warn!("Could not load branches from file, using embedded defaults");
+    RwLock::new(get_default_branches())
+});
+
+/// Load branches from a JSON file
+pub fn load_branches_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<BranchData>, std::io::Error> {
+    let content = std::fs::read_to_string(path)?;
+    let file: BranchDataFile = serde_json::from_str(&content)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok(file.branches)
+}
+
+/// Reload branches from a file (for runtime updates)
+pub fn reload_branches<P: AsRef<Path>>(path: P) -> Result<usize, std::io::Error> {
+    let branches = load_branches_from_file(path)?;
+    let count = branches.len();
+    *BRANCH_DATA.write().unwrap() = branches;
+    Ok(count)
+}
+
+/// Get all loaded branches
+pub fn get_branches() -> Vec<BranchData> {
+    BRANCH_DATA.read().unwrap().clone()
+}
+
+/// Get default embedded branches (fallback)
+fn get_default_branches() -> Vec<BranchData> {
+    vec![
+        BranchData {
+            branch_id: "KMBL001".to_string(),
+            name: "Kotak Mahindra Bank - Andheri West".to_string(),
+            city: "Mumbai".to_string(),
+            area: "Andheri West".to_string(),
+            address: "Ground Floor, Kora Kendra, S.V. Road, Andheri West, Mumbai - 400058".to_string(),
+            pincode: "400058".to_string(),
+            phone: "022-66006060".to_string(),
+            gold_loan_available: true,
+            timing: "10:00 AM - 5:00 PM (Mon-Sat)".to_string(),
+            facilities: vec!["Gold Valuation".to_string(), "Same Day Disbursement".to_string()],
+        },
+        BranchData {
+            branch_id: "KMBL101".to_string(),
+            name: "Kotak Mahindra Bank - Connaught Place".to_string(),
+            city: "Delhi".to_string(),
+            area: "Connaught Place".to_string(),
+            address: "M-Block, Connaught Place, New Delhi - 110001".to_string(),
+            pincode: "110001".to_string(),
+            phone: "011-66006060".to_string(),
+            gold_loan_available: true,
+            timing: "10:00 AM - 5:00 PM (Mon-Sat)".to_string(),
+            facilities: vec!["Gold Valuation".to_string(), "Same Day Disbursement".to_string()],
+        },
+        BranchData {
+            branch_id: "KMBL201".to_string(),
+            name: "Kotak Mahindra Bank - MG Road".to_string(),
+            city: "Bangalore".to_string(),
+            area: "MG Road".to_string(),
+            address: "Church Street, MG Road, Bangalore - 560001".to_string(),
+            pincode: "560001".to_string(),
+            phone: "080-66006060".to_string(),
+            gold_loan_available: true,
+            timing: "10:00 AM - 5:00 PM (Mon-Sat)".to_string(),
+            facilities: vec!["Gold Valuation".to_string(), "Same Day Disbursement".to_string()],
+        },
+        BranchData {
+            branch_id: "KMBL301".to_string(),
+            name: "Kotak Mahindra Bank - T Nagar".to_string(),
+            city: "Chennai".to_string(),
+            area: "T Nagar".to_string(),
+            address: "Usman Road, T Nagar, Chennai - 600017".to_string(),
+            pincode: "600017".to_string(),
+            phone: "044-66006060".to_string(),
+            gold_loan_available: true,
+            timing: "10:00 AM - 5:00 PM (Mon-Sat)".to_string(),
+            facilities: vec!["Gold Valuation".to_string(), "Same Day Disbursement".to_string()],
+        },
+    ]
+}
 
 /// Check eligibility tool
 pub struct EligibilityCheckTool {
@@ -450,96 +574,59 @@ impl Default for BranchLocatorTool {
     }
 }
 
-/// Get mock branch data
-fn get_mock_branches(city: &str, area: Option<&str>, _pincode: Option<&str>, max: usize) -> Vec<Value> {
+/// P0 FIX: Get branches from JSON data instead of hardcoded mock
+fn get_mock_branches(city: &str, area: Option<&str>, pincode: Option<&str>, max: usize) -> Vec<Value> {
     let city_lower = city.to_lowercase();
-
-    let all_branches = vec![
-        // Mumbai
-        json!({
-            "branch_id": "KMBL001",
-            "name": "Kotak Mahindra Bank - Andheri West",
-            "city": "Mumbai",
-            "area": "Andheri West",
-            "address": "Ground Floor, Kora Kendra, S.V. Road, Andheri West, Mumbai - 400058",
-            "phone": "022-66006060",
-            "gold_loan_available": true,
-            "timing": "10:00 AM - 5:00 PM (Mon-Sat)",
-            "facilities": ["Gold Valuation", "Same Day Disbursement", "Locker Service"]
-        }),
-        json!({
-            "branch_id": "KMBL002",
-            "name": "Kotak Mahindra Bank - Bandra",
-            "city": "Mumbai",
-            "area": "Bandra",
-            "address": "Hill Road, Bandra West, Mumbai - 400050",
-            "phone": "022-66006061",
-            "gold_loan_available": true,
-            "timing": "10:00 AM - 5:00 PM (Mon-Sat)",
-            "facilities": ["Gold Valuation", "Same Day Disbursement"]
-        }),
-        // Delhi
-        json!({
-            "branch_id": "KMBL101",
-            "name": "Kotak Mahindra Bank - Connaught Place",
-            "city": "Delhi",
-            "area": "Connaught Place",
-            "address": "M-Block, Connaught Place, New Delhi - 110001",
-            "phone": "011-66006060",
-            "gold_loan_available": true,
-            "timing": "10:00 AM - 5:00 PM (Mon-Sat)",
-            "facilities": ["Gold Valuation", "Same Day Disbursement", "Locker Service"]
-        }),
-        // Bangalore
-        json!({
-            "branch_id": "KMBL201",
-            "name": "Kotak Mahindra Bank - MG Road",
-            "city": "Bangalore",
-            "area": "MG Road",
-            "address": "Church Street, MG Road, Bangalore - 560001",
-            "phone": "080-66006060",
-            "gold_loan_available": true,
-            "timing": "10:00 AM - 5:00 PM (Mon-Sat)",
-            "facilities": ["Gold Valuation", "Same Day Disbursement"]
-        }),
-        // Chennai
-        json!({
-            "branch_id": "KMBL301",
-            "name": "Kotak Mahindra Bank - T Nagar",
-            "city": "Chennai",
-            "area": "T Nagar",
-            "address": "Usman Road, T Nagar, Chennai - 600017",
-            "phone": "044-66006060",
-            "gold_loan_available": true,
-            "timing": "10:00 AM - 5:00 PM (Mon-Sat)",
-            "facilities": ["Gold Valuation", "Same Day Disbursement", "Locker Service"]
-        }),
-    ];
+    let branches = get_branches();
 
     // Filter by city
-    let mut filtered: Vec<Value> = all_branches
+    let mut filtered: Vec<BranchData> = branches
         .into_iter()
         .filter(|b| {
-            b.get("city")
-                .and_then(|c| c.as_str())
-                .map(|c| c.to_lowercase().contains(&city_lower))
-                .unwrap_or(false)
+            b.city.to_lowercase().contains(&city_lower) ||
+            city_lower.contains(&b.city.to_lowercase())
         })
         .collect();
+
+    // Filter by pincode if provided (exact match)
+    if let Some(pin) = pincode {
+        let pin_matches: Vec<BranchData> = filtered.iter()
+            .filter(|b| b.pincode == pin)
+            .cloned()
+            .collect();
+        if !pin_matches.is_empty() {
+            filtered = pin_matches;
+        }
+    }
 
     // Filter by area if provided
     if let Some(area_str) = area {
         let area_lower = area_str.to_lowercase();
-        filtered.retain(|b| {
-                b.get("area")
-                    .and_then(|a| a.as_str())
-                    .map(|a| a.to_lowercase().contains(&area_lower))
-                    .unwrap_or(false)
-            });
+        let area_matches: Vec<BranchData> = filtered.iter()
+            .filter(|b| b.area.to_lowercase().contains(&area_lower))
+            .cloned()
+            .collect();
+        if !area_matches.is_empty() {
+            filtered = area_matches;
+        }
     }
 
+    // Convert to JSON Value and truncate
     filtered.truncate(max);
-    filtered
+    filtered.into_iter()
+        .map(|b| json!({
+            "branch_id": b.branch_id,
+            "name": b.name,
+            "city": b.city,
+            "area": b.area,
+            "address": b.address,
+            "pincode": b.pincode,
+            "phone": b.phone,
+            "gold_loan_available": b.gold_loan_available,
+            "timing": b.timing,
+            "facilities": b.facilities
+        }))
+        .collect()
 }
 
 

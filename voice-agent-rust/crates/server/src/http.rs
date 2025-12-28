@@ -16,6 +16,7 @@ use tower_http::compression::CompressionLayer;
 
 use crate::state::AppState;
 use crate::websocket::{WebSocketHandler, create_session};
+use crate::metrics::metrics_handler;
 use voice_agent_tools::ToolExecutor;
 
 /// Create the application router
@@ -37,6 +38,9 @@ pub fn create_router(state: AppState) -> Router {
         // Health check
         .route("/health", get(health_check))
         .route("/ready", get(readiness_check))
+
+        // P0 FIX: Prometheus metrics endpoint
+        .route("/metrics", get(metrics_handler))
 
         // WebSocket
         .route("/ws/:session_id", get(ws_handler))

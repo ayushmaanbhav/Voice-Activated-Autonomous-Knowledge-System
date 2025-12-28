@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use voice_agent_config::Settings;
-use voice_agent_server::{create_router, AppState};
+use voice_agent_server::{create_router, AppState, init_metrics};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,6 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration
     let config = Settings::default();
     tracing::info!("Loaded configuration");
+
+    // P0 FIX: Initialize Prometheus metrics
+    let _metrics_handle = init_metrics();
+    tracing::info!("Initialized Prometheus metrics at /metrics");
 
     // Create application state
     let state = AppState::new(config.clone());
