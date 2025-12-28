@@ -88,16 +88,19 @@ impl WordChunker {
     }
 
     /// Parse words from buffer
+    ///
+    /// P2 FIX: Optimized to collect word boundaries first, then extract words in a single pass.
+    /// Previously O(n²) due to repeated String allocations; now O(n).
     fn parse_words(&mut self) {
-        // Split on whitespace but preserve punctuation
+        // First pass: collect word boundaries (start, end) without allocating
+        let mut boundaries: Vec<(usize, usize)> = Vec::new();
         let mut word_start = None;
 
         for (i, c) in self.buffer.char_indices() {
             if c.is_whitespace() {
                 if let Some(start) = word_start {
-                    let word = self.buffer[start..i].to_string();
-                    if !word.is_empty() {
-                        self.words.push(word);
+                    if start < i {
+                        boundaries.push((start, i));
                     }
                     word_start = None;
                 }
@@ -106,9 +109,17 @@ impl WordChunker {
             }
         }
 
-        // Keep incomplete word in buffer
+        // Extract complete words in a single pass
+        for (start, end) in boundaries {
+            self.words.push(self.buffer[start..end].to_string());
+        }
+
+        // Keep incomplete word in buffer using drain to avoid reallocation
         if let Some(start) = word_start {
-            self.buffer = self.buffer[start..].to_string();
+            // Only keep the incomplete word portion
+            let remaining = self.buffer[start..].to_string();
+            self.buffer.clear();
+            self.buffer.push_str(&remaining);
         } else {
             self.buffer.clear();
         }

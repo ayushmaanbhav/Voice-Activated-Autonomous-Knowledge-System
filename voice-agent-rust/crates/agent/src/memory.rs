@@ -162,9 +162,10 @@ impl ConversationMemory {
             .flat_map(|e| e.intents.clone())
             .collect();
 
+        // P2 FIX: Truncate at word boundaries instead of mid-word
         let summary = entries.iter()
             .filter(|e| e.role == "user")
-            .map(|e| e.content.chars().take(50).collect::<String>())
+            .map(|e| Self::truncate_at_word_boundary(&e.content, 50))
             .collect::<Vec<_>>()
             .join("; ");
 
@@ -270,6 +271,22 @@ impl ConversationMemory {
     /// Get total turns
     pub fn total_turns(&self) -> usize {
         *self.total_turns.read()
+    }
+
+    /// P2 FIX: Truncate text at word boundary to avoid cutting mid-word
+    fn truncate_at_word_boundary(text: &str, max_chars: usize) -> String {
+        if text.len() <= max_chars {
+            return text.to_string();
+        }
+
+        // Find the last space before max_chars
+        let truncated = &text[..max_chars];
+        if let Some(last_space) = truncated.rfind(char::is_whitespace) {
+            format!("{}...", &text[..last_space])
+        } else {
+            // No space found, just truncate with ellipsis
+            format!("{}...", truncated)
+        }
     }
 }
 

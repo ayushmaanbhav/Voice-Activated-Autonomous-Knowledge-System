@@ -328,11 +328,14 @@ pub trait Tool: Send + Sync {
     async fn execute(&self, input: Value) -> Result<ToolOutput, ToolError>;
 
     /// Validate input (optional, default uses schema)
+    ///
+    /// P2 FIX: Enhanced validation that checks types, enum values, and ranges,
+    /// not just required fields.
     fn validate(&self, input: &Value) -> Result<(), ToolError> {
-        // Basic validation - check required fields
         let schema = self.schema();
 
         if let Value::Object(obj) = input {
+            // Check required fields
             for required in &schema.input_schema.required {
                 if !obj.contains_key(required) {
                     return Err(ToolError::invalid_params(format!(
@@ -341,6 +344,15 @@ pub trait Tool: Send + Sync {
                     )));
                 }
             }
+
+            // P2 FIX: Validate each property's type and constraints
+            for (name, value) in obj {
+                if let Some(prop_schema) = schema.input_schema.properties.get(name) {
+                    validate_property(name, value, prop_schema)?;
+                }
+                // Unknown properties are allowed (no additionalProperties: false)
+            }
+
             Ok(())
         } else if schema.input_schema.properties.is_empty() {
             // No properties required
@@ -348,6 +360,78 @@ pub trait Tool: Send + Sync {
         } else {
             Err(ToolError::invalid_params("Input must be an object"))
         }
+    }
+}
+
+/// P2 FIX: Validate a property value against its schema
+fn validate_property(name: &str, value: &Value, schema: &PropertySchema) -> Result<(), ToolError> {
+    // Check type
+    let type_valid = match schema.prop_type.as_str() {
+        "string" => value.is_string(),
+        "number" => value.is_number(),
+        "integer" => value.is_i64() || value.is_u64(),
+        "boolean" => value.is_boolean(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        "null" => value.is_null(),
+        _ => true, // Unknown types pass through
+    };
+
+    if !type_valid {
+        return Err(ToolError::invalid_params(format!(
+            "Field '{}' must be of type '{}', got '{}'",
+            name,
+            schema.prop_type,
+            json_type_name(value)
+        )));
+    }
+
+    // Check enum values
+    if let Some(enum_values) = &schema.enum_values {
+        if let Some(s) = value.as_str() {
+            if !enum_values.contains(&s.to_string()) {
+                return Err(ToolError::invalid_params(format!(
+                    "Field '{}' must be one of: [{}], got '{}'",
+                    name,
+                    enum_values.join(", "),
+                    s
+                )));
+            }
+        }
+    }
+
+    // Check numeric range
+    if let Some(num) = value.as_f64() {
+        if let Some(min) = schema.minimum {
+            if num < min {
+                return Err(ToolError::invalid_params(format!(
+                    "Field '{}' must be >= {}, got {}",
+                    name, min, num
+                )));
+            }
+        }
+        if let Some(max) = schema.maximum {
+            if num > max {
+                return Err(ToolError::invalid_params(format!(
+                    "Field '{}' must be <= {}, got {}",
+                    name, max, num
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Get a human-readable type name for a JSON value
+fn json_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
     }
 }
 
@@ -380,5 +464,47 @@ mod tests {
     fn test_tool_error() {
         let err = ToolError::invalid_params("Bad input");
         assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    #[test]
+    fn test_validate_property_type() {
+        let string_schema = PropertySchema::string("Test");
+
+        // Valid string
+        assert!(validate_property("name", &serde_json::json!("hello"), &string_schema).is_ok());
+
+        // Invalid: number instead of string
+        assert!(validate_property("name", &serde_json::json!(123), &string_schema).is_err());
+    }
+
+    #[test]
+    fn test_validate_enum() {
+        let enum_schema = PropertySchema::enum_type("Status", vec!["active".into(), "inactive".into()]);
+
+        // Valid enum value
+        assert!(validate_property("status", &serde_json::json!("active"), &enum_schema).is_ok());
+
+        // Invalid enum value
+        let result = validate_property("status", &serde_json::json!("unknown"), &enum_schema);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("must be one of"));
+    }
+
+    #[test]
+    fn test_validate_range() {
+        let range_schema = PropertySchema::number("Amount").with_range(100.0, 1000.0);
+
+        // Valid: within range
+        assert!(validate_property("amount", &serde_json::json!(500), &range_schema).is_ok());
+
+        // Invalid: below minimum
+        let result = validate_property("amount", &serde_json::json!(50), &range_schema);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains(">="));
+
+        // Invalid: above maximum
+        let result = validate_property("amount", &serde_json::json!(2000), &range_schema);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("<="));
     }
 }

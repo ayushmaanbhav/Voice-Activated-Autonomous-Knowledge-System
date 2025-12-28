@@ -405,10 +405,24 @@ pub struct AudioConfig {
     pub jitter_buffer_ms: u32,
 
     /// Enable echo cancellation
+    ///
+    /// P2 FIX: Currently a placeholder flag. Actual AEC implementation requires
+    /// a signal processing library (e.g., webrtc-audio-processing, speexdsp).
+    /// When implemented, this will:
+    /// - Cancel speaker output from microphone input
+    /// - Reduce feedback during barge-in
+    /// - Improve VAD accuracy during TTS playback
     #[serde(default = "default_true")]
     pub echo_cancellation: bool,
 
     /// Enable noise suppression
+    ///
+    /// P2 FIX: Currently a placeholder flag. Actual NS implementation requires
+    /// a signal processing library (e.g., rnnoise, webrtc-audio-processing).
+    /// When implemented, this will:
+    /// - Reduce background noise before STT
+    /// - Improve transcription accuracy in noisy environments
+    /// - Work with energy-based VAD for better speech detection
     #[serde(default = "default_true")]
     pub noise_suppression: bool,
 }

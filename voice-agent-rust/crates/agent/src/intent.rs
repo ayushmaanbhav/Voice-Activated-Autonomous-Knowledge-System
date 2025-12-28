@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Intent definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -271,6 +272,9 @@ impl IntentDetector {
     }
 
     /// Calculate intent match score
+    ///
+    /// P2 FIX: Uses unicode_segmentation for proper Hindi/Devanagari word boundaries
+    /// instead of split_whitespace() which doesn't handle Indian scripts correctly.
     fn calculate_intent_score(&self, text: &str, intent: &Intent) -> f32 {
         let mut score: f32 = 0.0;
 
@@ -288,9 +292,13 @@ impl IntentDetector {
                 score = score.max(0.9);
             }
 
-            // Word overlap
-            let example_words: std::collections::HashSet<&str> = example_lower.split_whitespace().collect();
-            let text_words: std::collections::HashSet<&str> = text.split_whitespace().collect();
+            // Word overlap - P2 FIX: Use Unicode word boundaries for Hindi/Devanagari support
+            let example_words: std::collections::HashSet<&str> = example_lower
+                .unicode_words()
+                .collect();
+            let text_words: std::collections::HashSet<&str> = text
+                .unicode_words()
+                .collect();
 
             let overlap = example_words.intersection(&text_words).count();
             if overlap > 0 {
@@ -322,20 +330,49 @@ impl IntentDetector {
     }
 
     /// Extract slot value using patterns
+    ///
+    /// P2 FIX: Improved amount extraction to handle lakh, crore, commas, and plain numbers.
     fn extract_slot_value(&self, text: &str, slot_name: &str) -> Option<String> {
         let text_lower = text.to_lowercase();
 
         match slot_name {
             "loan_amount" => {
-                // Look for amount patterns
-                if let Some(idx) = text_lower.find("lakh") {
-                    let before: String = text_lower[..idx].chars().rev()
-                        .take_while(|c| c.is_ascii_digit() || *c == '.' || c.is_whitespace())
-                        .collect::<String>()
-                        .chars().rev().collect();
-                    let num = before.trim().parse::<f64>().ok()?;
-                    return Some(format!("{}", (num * 100000.0) as i64));
+                // P2 FIX: Handle multiple amount patterns
+
+                // Pattern 1: "X crore" (10 million)
+                if let Some(idx) = text_lower.find("crore") {
+                    if let Some(num) = Self::extract_number_before(&text_lower[..idx]) {
+                        return Some(format!("{}", (num * 10_000_000.0) as i64));
+                    }
                 }
+
+                // Pattern 2: "X lakh" (100 thousand)
+                if let Some(idx) = text_lower.find("lakh") {
+                    if let Some(num) = Self::extract_number_before(&text_lower[..idx]) {
+                        return Some(format!("{}", (num * 100_000.0) as i64));
+                    }
+                }
+
+                // Pattern 3: "X thousand" or "X hazar"
+                if text_lower.contains("thousand") || text_lower.contains("hazar") || text_lower.contains("hazaar") {
+                    let idx = text_lower.find("thousand")
+                        .or_else(|| text_lower.find("hazar"))
+                        .or_else(|| text_lower.find("hazaar"))?;
+                    if let Some(num) = Self::extract_number_before(&text_lower[..idx]) {
+                        return Some(format!("{}", (num * 1_000.0) as i64));
+                    }
+                }
+
+                // Pattern 4: Numbers with commas (1,00,000 or 100,000)
+                let no_commas = text_lower.replace(",", "");
+                for word in no_commas.split_whitespace() {
+                    if let Ok(num) = word.parse::<i64>() {
+                        if num >= 1000 { // Assume amounts are at least 1000
+                            return Some(format!("{}", num));
+                        }
+                    }
+                }
+
                 None
             }
             "gold_weight" => {
@@ -363,6 +400,38 @@ impl IntentDetector {
             }
             _ => None
         }
+    }
+
+    /// P2 FIX: Helper to extract number from text (handles Hindi number words too)
+    fn extract_number_before(text: &str) -> Option<f64> {
+        // First try to extract a digit-based number
+        let number_str: String = text.chars().rev()
+            .take_while(|c| c.is_ascii_digit() || *c == '.' || c.is_whitespace())
+            .collect::<String>()
+            .chars().rev().collect();
+
+        if let Ok(num) = number_str.trim().parse::<f64>() {
+            return Some(num);
+        }
+
+        // Try Hindi number words
+        let text_lower = text.to_lowercase();
+        let hindi_numbers = [
+            ("ek", 1.0), ("do", 2.0), ("teen", 3.0), ("char", 4.0), ("paanch", 5.0),
+            ("panch", 5.0), ("che", 6.0), ("saat", 7.0), ("aath", 8.0), ("nau", 9.0),
+            ("das", 10.0), ("bees", 20.0), ("pachees", 25.0), ("pachas", 50.0),
+            ("one", 1.0), ("two", 2.0), ("three", 3.0), ("four", 4.0), ("five", 5.0),
+            ("six", 6.0), ("seven", 7.0), ("eight", 8.0), ("nine", 9.0), ("ten", 10.0),
+            ("twenty", 20.0), ("fifty", 50.0),
+        ];
+
+        for (word, value) in hindi_numbers {
+            if text_lower.contains(word) {
+                return Some(value);
+            }
+        }
+
+        None
     }
 
     /// Get intent by name
