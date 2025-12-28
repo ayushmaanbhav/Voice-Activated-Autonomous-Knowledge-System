@@ -20,9 +20,11 @@ use tokio::sync::{mpsc, broadcast, RwLock};
 use tokio::time::interval;
 
 use voice_agent_pipeline::{
-    stt::{StreamingStt, SttConfig, SttEngine},
+    stt::{StreamingStt, SttConfig, SttEngine, IndicConformerConfig},
     tts::{StreamingTts, TtsConfig, TtsEngine, TtsEvent, create_hindi_g2p},
+    vad::{SileroVad, SileroConfig, VadState, VadResult},
 };
+use voice_agent_core::AudioFrame;
 use voice_agent_transport::{
     TransportSession, SessionConfig, TransportEvent,
 };
@@ -36,10 +38,14 @@ pub struct VoiceSessionConfig {
     pub agent: AgentConfig,
     /// STT configuration
     pub stt: SttConfig,
+    /// IndicConformer configuration (if using IndicConformer engine)
+    pub indicconformer: Option<IndicConformerConfig>,
     /// TTS configuration
     pub tts: TtsConfig,
     /// Transport configuration
     pub transport: SessionConfig,
+    /// VAD configuration (Silero)
+    pub vad: SileroConfig,
     /// Enable barge-in
     pub barge_in_enabled: bool,
     /// Silence timeout for turn detection (ms)
@@ -50,6 +56,12 @@ pub struct VoiceSessionConfig {
     pub audio_poll_interval_ms: u64,
     /// Energy threshold for voice activity detection (0.0 - 1.0)
     pub vad_energy_threshold: f32,
+    /// Use Silero VAD instead of energy-based detection
+    pub use_silero_vad: bool,
+    /// Path to Silero VAD model
+    pub vad_model_path: Option<std::path::PathBuf>,
+    /// Path to IndicConformer model directory
+    pub stt_model_path: Option<std::path::PathBuf>,
 }
 
 impl Default for VoiceSessionConfig {
@@ -61,16 +73,21 @@ impl Default for VoiceSessionConfig {
                 language: Some("hi".to_string()),
                 ..Default::default()
             },
+            indicconformer: Some(IndicConformerConfig::default()),
             tts: TtsConfig {
                 engine: TtsEngine::Piper,
                 ..Default::default()
             },
             transport: SessionConfig::default(),
+            vad: SileroConfig::default(),
             barge_in_enabled: true,
             silence_timeout_ms: 800,
             max_turn_duration_ms: 30000,
             audio_poll_interval_ms: 20, // 20ms = 50Hz polling (matches Opus frame size)
             vad_energy_threshold: 0.01,
+            use_silero_vad: false, // Default to energy-based (simpler, no model needed)
+            vad_model_path: None,
+            stt_model_path: None,
         }
     }
 }
@@ -123,6 +140,8 @@ pub struct VoiceSession {
     agent: Arc<GoldLoanAgent>,
     stt: Arc<StreamingStt>,
     tts: Arc<StreamingTts>,
+    /// Silero VAD (optional, if enabled)
+    vad: Option<Arc<parking_lot::Mutex<SileroVad>>>,
     event_tx: broadcast::Sender<VoiceSessionEvent>,
     /// Transport session for WebRTC/WebSocket communication
     transport: Arc<RwLock<Option<TransportSession>>>,
@@ -135,6 +154,8 @@ pub struct VoiceSession {
     shutdown_tx: broadcast::Sender<()>,
     /// Last voice activity timestamp for silence detection
     last_voice_activity: Arc<RwLock<Option<Instant>>>,
+    /// VAD state for speech detection
+    vad_state: Arc<RwLock<VadState>>,
 }
 
 impl VoiceSession {
@@ -165,6 +186,27 @@ impl VoiceSession {
         // Create TTS
         let tts = Arc::new(StreamingTts::simple(config.tts.clone()));
 
+        // Create VAD if enabled
+        let vad = if config.use_silero_vad {
+            if let Some(ref model_path) = config.vad_model_path {
+                match SileroVad::new(model_path, config.vad.clone()) {
+                    Ok(v) => Some(Arc::new(parking_lot::Mutex::new(v))),
+                    Err(e) => {
+                        tracing::warn!("Failed to load Silero VAD: {}, falling back to energy-based", e);
+                        None
+                    }
+                }
+            } else {
+                // Create energy-based fallback VAD
+                match SileroVad::simple(config.vad.clone()) {
+                    Ok(v) => Some(Arc::new(parking_lot::Mutex::new(v))),
+                    Err(_) => None,
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
             session_id,
             config,
@@ -172,6 +214,7 @@ impl VoiceSession {
             agent,
             stt,
             tts,
+            vad,
             event_tx,
             transport: Arc::new(RwLock::new(None)),
             audio_out_tx,
@@ -179,6 +222,7 @@ impl VoiceSession {
             transport_event_tx,
             shutdown_tx,
             last_voice_activity: Arc::new(RwLock::new(None)),
+            vad_state: Arc::new(RwLock::new(VadState::Silence)),
         })
     }
 
@@ -644,6 +688,56 @@ impl VoiceSession {
                 new: new_state,
             });
         }
+    }
+
+    /// Process audio through VAD and return whether speech is detected
+    ///
+    /// Uses Silero VAD if enabled, otherwise falls back to energy-based detection.
+    pub fn detect_voice_activity(&self, samples: &[f32]) -> (bool, VadResult) {
+        if let Some(ref vad) = self.vad {
+            // Use Silero VAD
+            use voice_agent_core::{SampleRate, Channels};
+            let mut frame = AudioFrame::new(
+                samples.to_vec(),
+                SampleRate::Hz16000,
+                Channels::Mono,
+                0,
+            );
+
+            let vad_guard = vad.lock();
+            match vad_guard.process(&mut frame) {
+                Ok((_state, _prob, result)) => {
+                    let is_speech = matches!(
+                        result,
+                        VadResult::SpeechConfirmed | VadResult::SpeechContinue | VadResult::PotentialSpeechStart
+                    );
+                    (is_speech, result)
+                }
+                Err(e) => {
+                    tracing::warn!("VAD error: {}, falling back to energy", e);
+                    let energy = calculate_energy(samples);
+                    let is_speech = energy > self.config.vad_energy_threshold;
+                    (is_speech, if is_speech { VadResult::SpeechContinue } else { VadResult::Silence })
+                }
+            }
+        } else {
+            // Use simple energy-based detection
+            let energy = calculate_energy(samples);
+            let is_speech = energy > self.config.vad_energy_threshold;
+            (is_speech, if is_speech { VadResult::SpeechContinue } else { VadResult::Silence })
+        }
+    }
+
+    /// Reset VAD state
+    pub fn reset_vad(&self) {
+        if let Some(ref vad) = self.vad {
+            vad.lock().reset();
+        }
+    }
+
+    /// Get current VAD state
+    pub async fn get_vad_state(&self) -> VadState {
+        *self.vad_state.read().await
     }
 }
 

@@ -9,6 +9,7 @@ description = "Audio pipeline with VAD, STT, TTS, and turn detection"
 [features]
 default = []
 onnx = ["dep:ort"]
+candle = ["dep:candle-core", "dep:candle-nn", "dep:safetensors"]
 
 [dependencies]
 voice-agent-core.workspace = true
@@ -21,10 +22,15 @@ async-stream.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 
-# ML
+# ML - ONNX Runtime
 ort = { version = "2.0.0-rc.9", optional = true }
 ndarray.workspace = true
 tokenizers.workspace = true
+
+# ML - Candle (native Rust inference with SafeTensors)
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+safetensors = { workspace = true, optional = true }
 
 # Audio
 rubato.workspace = true

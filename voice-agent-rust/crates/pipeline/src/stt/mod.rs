@@ -7,10 +7,12 @@
 mod streaming;
 mod decoder;
 mod vocab;
+mod indicconformer;
 
 pub use streaming::{StreamingStt, SttConfig, SttEngine};
 pub use decoder::{EnhancedDecoder, DecoderConfig};
 pub use vocab::{Vocabulary, load_vocabulary, load_domain_vocab};
+pub use indicconformer::{IndicConformerStt, IndicConformerConfig, MelFilterbank};
 
 use crate::PipelineError;
 use voice_agent_core::TranscriptResult;

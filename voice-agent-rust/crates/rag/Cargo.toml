@@ -9,6 +9,7 @@ description = "RAG with hybrid search and early-exit cross-encoder reranking"
 [features]
 default = []
 onnx = ["dep:ort"]
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:hf-hub"]
 
 [dependencies]
 voice-agent-core.workspace = true
@@ -26,10 +27,17 @@ qdrant-client.workspace = true
 # Search
 tantivy.workspace = true
 
-# ML
+# ML - ONNX Runtime
 ort = { version = "2.0.0-rc.9", optional = true }
 ndarray.workspace = true
 tokenizers.workspace = true
+
+# ML - Candle (native Rust inference with SafeTensors)
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+candle-transformers = { workspace = true, optional = true }
+safetensors = { workspace = true, optional = true }
+hf-hub = { workspace = true, optional = true }
 
 # Serialization
 serde = { workspace = true, features = ["derive"] }

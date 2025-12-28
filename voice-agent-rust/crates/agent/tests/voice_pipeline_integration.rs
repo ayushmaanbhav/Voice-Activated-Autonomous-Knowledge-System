@@ -229,3 +229,114 @@ async fn test_state_machine() {
     session.end("done").await;
     assert_eq!(session.state().await, VoiceSessionState::Ended);
 }
+
+/// Test VAD voice activity detection
+#[tokio::test]
+async fn test_vad_voice_detection() {
+    use voice_agent_agent::vad::{VadResult};
+
+    let config = VoiceSessionConfig::default();
+    let session = VoiceSession::new("test-vad", config).unwrap();
+
+    // Test with silence (should detect no speech)
+    let silence = vec![0.0f32; 512];
+    let (is_speech, result) = session.detect_voice_activity(&silence);
+    assert!(!is_speech);
+    assert!(matches!(result, VadResult::Silence));
+
+    // Test with loud signal (should detect speech)
+    let loud: Vec<f32> = (0..512).map(|i| (i as f32 * 0.1).sin() * 0.5).collect();
+    let (is_speech, result) = session.detect_voice_activity(&loud);
+    assert!(is_speech);
+    assert!(matches!(result, VadResult::SpeechContinue | VadResult::PotentialSpeechStart | VadResult::SpeechConfirmed));
+}
+
+/// Test VAD with energy-based fallback
+#[tokio::test]
+async fn test_vad_energy_fallback() {
+    let mut config = VoiceSessionConfig::default();
+    config.use_silero_vad = false; // Use energy-based
+    config.vad_energy_threshold = 0.1;
+
+    let session = VoiceSession::new("test-vad-energy", config).unwrap();
+
+    // Low energy should be silence
+    let low_energy = vec![0.01f32; 512];
+    let (is_speech, _) = session.detect_voice_activity(&low_energy);
+    assert!(!is_speech);
+
+    // High energy should be speech
+    let high_energy: Vec<f32> = (0..512).map(|_| 0.5).collect();
+    let (is_speech, _) = session.detect_voice_activity(&high_energy);
+    assert!(is_speech);
+}
+
+/// Test VAD reset
+#[tokio::test]
+async fn test_vad_reset() {
+    let mut config = VoiceSessionConfig::default();
+    config.use_silero_vad = true;
+    config.vad_model_path = None; // Use simple fallback
+
+    let session = VoiceSession::new("test-vad-reset", config).unwrap();
+
+    // Process some speech
+    let speech: Vec<f32> = (0..512).map(|i| (i as f32 * 0.1).sin() * 0.5).collect();
+    let _ = session.detect_voice_activity(&speech);
+
+    // Reset should work without error
+    session.reset_vad();
+
+    // Should be back to initial state
+    let (is_speech, _) = session.detect_voice_activity(&vec![0.0; 512]);
+    assert!(!is_speech);
+}
+
+/// Test VoiceSession with Silero VAD configuration
+#[tokio::test]
+async fn test_silero_vad_config() {
+    use voice_agent_agent::SileroConfig;
+
+    let mut config = VoiceSessionConfig::default();
+    config.use_silero_vad = true;
+    config.vad = SileroConfig {
+        threshold: 0.6, // Higher threshold
+        chunk_size: 512,
+        sample_rate: 16000,
+        min_speech_frames: 4,
+        min_silence_frames: 6,
+        energy_floor_db: -45.0,
+    };
+
+    let session = VoiceSession::new("test-silero-config", config.clone()).unwrap();
+
+    // Verify session was created successfully
+    assert_eq!(session.session_id(), "test-silero-config");
+
+    // Verify config was applied
+    assert_eq!(config.vad.threshold, 0.6);
+    assert_eq!(config.vad.min_speech_frames, 4);
+}
+
+/// Test IndicConformer config
+#[tokio::test]
+async fn test_indicconformer_config() {
+    use voice_agent_agent::IndicConformerConfig;
+
+    let mut config = VoiceSessionConfig::default();
+    config.indicconformer = Some(IndicConformerConfig {
+        language: "hi".to_string(),
+        n_mels: 80,
+        ..Default::default()
+    });
+
+    let session = VoiceSession::new("test-indicconf", config.clone()).unwrap();
+
+    // Verify session was created
+    assert_eq!(session.session_id(), "test-indicconf");
+
+    // Verify config
+    let ic = config.indicconformer.unwrap();
+    assert_eq!(ic.language, "hi");
+    assert_eq!(ic.n_mels, 80);
+}

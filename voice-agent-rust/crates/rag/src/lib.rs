@@ -5,14 +5,17 @@
 //! - Sparse BM25 search via Tantivy
 //! - Hybrid fusion with RRF
 //! - Early-exit cross-encoder reranking
+//! - Candle BERT embeddings (native Rust inference)
 
 pub mod embeddings;
 pub mod vector_store;
 pub mod sparse_search;
 pub mod reranker;
 pub mod retriever;
+pub mod candle_embeddings;
 
-pub use embeddings::{Embedder, EmbeddingConfig};
+pub use embeddings::{Embedder, EmbeddingConfig, SimpleEmbedder};
+pub use candle_embeddings::{CandleBertEmbedder, CandleEmbeddingConfig, PoolingStrategy, UnifiedEmbedder};
 pub use vector_store::{VectorStore, VectorStoreConfig};
 pub use sparse_search::{SparseIndex, SparseConfig};
 pub use reranker::{EarlyExitReranker, RerankerConfig, ExitStrategy};

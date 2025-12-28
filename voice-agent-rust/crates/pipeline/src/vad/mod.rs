@@ -1,11 +1,14 @@
 //! Voice Activity Detection
 //!
-//! MagicNet-inspired VAD with 10ms frames and no future lookahead.
-//! Architecture: Causal depth-separable convolutions + GRU
+//! Provides two VAD implementations:
+//! - MagicNet: Custom VAD with 10ms frames and mel filterbank features
+//! - Silero: Production-ready VAD using raw audio input (recommended)
 
 mod magicnet;
+mod silero;
 
 pub use magicnet::{VoiceActivityDetector, VadConfig, VadState, VadResult};
+pub use silero::{SileroVad, SileroConfig};
 
 use crate::PipelineError;
 use voice_agent_core::AudioFrame;

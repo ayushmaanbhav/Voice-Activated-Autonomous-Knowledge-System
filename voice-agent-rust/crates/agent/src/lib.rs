@@ -29,6 +29,19 @@ pub use voice_agent_transport::{
     WebRtcConfig, WebSocketConfig, AudioFormat, AudioCodec,
 };
 
+// Re-export VAD and STT types for convenience
+pub use voice_agent_pipeline::vad::{
+    SileroVad, SileroConfig, VadState, VadResult, VadEngine, VadConfig,
+};
+pub use voice_agent_pipeline::stt::{
+    IndicConformerStt, IndicConformerConfig, StreamingStt, SttConfig, SttEngine,
+};
+
+// Re-export vad module for use in tests
+pub mod vad {
+    pub use voice_agent_pipeline::vad::*;
+}
+
 use thiserror::Error;
 
 /// Agent errors

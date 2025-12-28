@@ -5,10 +5,22 @@
 //! - Barge-in aware (can stop mid-word)
 //! - Multiple backend support (Piper, IndicF5, Parler)
 //! - Hindi/Hinglish G2P conversion
+//! - Native Candle-based IndicF5 model (optional)
 
 mod streaming;
 mod chunker;
 mod g2p;
+
+/// Candle-based TTS implementations (native Rust with SafeTensors)
+#[cfg(feature = "candle")]
+pub mod candle;
+
+#[cfg(not(feature = "candle"))]
+pub mod candle {
+    //! Stub module when candle feature is disabled
+    pub struct IndicF5Model;
+    pub struct IndicF5Config;
+}
 
 pub use streaming::{StreamingTts, TtsConfig, TtsEngine, TtsEvent};
 pub use chunker::{WordChunker, ChunkStrategy};

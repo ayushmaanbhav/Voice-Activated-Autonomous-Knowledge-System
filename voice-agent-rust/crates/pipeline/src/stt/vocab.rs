@@ -97,6 +97,26 @@ impl Vocabulary {
     pub fn into_tokens(self) -> Vec<String> {
         self.tokens
     }
+
+    /// Create vocabulary from token list (alias for new)
+    pub fn from_tokens(tokens: Vec<String>) -> Self {
+        Self::new(tokens)
+    }
+
+    /// Get vocabulary size (alias for size)
+    pub fn len(&self) -> usize {
+        self.tokens.len()
+    }
+
+    /// Check if vocabulary is empty
+    pub fn is_empty(&self) -> bool {
+        self.tokens.is_empty()
+    }
+
+    /// Default vocabulary for IndicConformer (used in testing)
+    pub fn default_indicconformer() -> Self {
+        load_indicconformer_vocab(None).unwrap_or_else(|_| Self::new(Vec::new()))
+    }
 }
 
 /// Load vocabulary for specific engine
