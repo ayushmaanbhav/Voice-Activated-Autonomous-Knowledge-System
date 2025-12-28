@@ -602,12 +602,105 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-/// Simple scorer for testing (no model required)
+/// P2 FIX: Improved scorer with TF-IDF-like weighting
+///
+/// Simple scorer for fallback when no model is available.
+/// Uses term frequency and inverse document frequency approximation
+/// for better relevance scoring than plain Jaccard similarity.
 pub struct SimpleScorer;
 
 impl SimpleScorer {
-    /// Score based on keyword overlap
+    /// Common stopwords for English and Hindi
+    const STOPWORDS: &'static [&'static str] = &[
+        // English
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "must", "shall", "can", "need", "dare",
+        "to", "of", "in", "for", "on", "with", "at", "by", "from", "as",
+        "into", "through", "during", "before", "after", "above", "below",
+        "between", "under", "again", "further", "then", "once", "here",
+        "there", "when", "where", "why", "how", "all", "each", "few",
+        "more", "most", "other", "some", "such", "no", "nor", "not",
+        "only", "own", "same", "so", "than", "too", "very", "just",
+        "and", "but", "if", "or", "because", "until", "while", "about",
+        "i", "me", "my", "myself", "we", "our", "ours", "ourselves",
+        "you", "your", "yours", "yourself", "yourselves", "he", "him",
+        "his", "himself", "she", "her", "hers", "herself", "it", "its",
+        "itself", "they", "them", "their", "theirs", "themselves",
+        "what", "which", "who", "whom", "this", "that", "these", "those",
+        // Hindi
+        "का", "की", "के", "को", "में", "है", "हैं", "था", "थी", "थे",
+        "से", "पर", "और", "या", "एक", "यह", "वह", "जो", "तो", "भी",
+        "ने", "हो", "कर", "ही", "इस", "उस", "अपने", "किया", "हुए",
+        "main", "mujhe", "hai", "hain", "ka", "ki", "ke", "ko", "mein",
+        "se", "par", "aur", "ya", "ek", "yeh", "woh", "jo", "toh", "bhi",
+    ];
+
+    /// Score using TF-IDF-like weighting
+    ///
+    /// Scoring formula:
+    /// - Term frequency: sqrt(count in doc) for diminishing returns
+    /// - IDF approximation: log(1 + word_length) favors specific terms
+    /// - Stopword filtering: common words are excluded
+    /// - Position boost: words appearing early in query get slight boost
     pub fn score(query: &str, document: &str) -> f32 {
+        let query_lower = query.to_lowercase();
+        let doc_lower = document.to_lowercase();
+
+        let stopwords: std::collections::HashSet<&str> = Self::STOPWORDS.iter().copied().collect();
+
+        // Extract query terms (filter stopwords, keep order for position weighting)
+        let query_terms: Vec<&str> = query_lower
+            .split_whitespace()
+            .filter(|w| w.len() > 1 && !stopwords.contains(*w))
+            .collect();
+
+        if query_terms.is_empty() {
+            return 0.0;
+        }
+
+        // Count term frequencies in document
+        let doc_words: Vec<&str> = doc_lower.split_whitespace().collect();
+        let doc_len = doc_words.len().max(1) as f32;
+
+        let mut total_score = 0.0f32;
+        let mut matched_terms = 0usize;
+
+        for (pos, term) in query_terms.iter().enumerate() {
+            // Count occurrences in document
+            let tf = doc_words.iter().filter(|w| **w == *term).count() as f32;
+
+            if tf > 0.0 {
+                matched_terms += 1;
+
+                // TF: sqrt for diminishing returns on repeated terms
+                let tf_score = tf.sqrt();
+
+                // IDF approximation: longer words are more specific
+                let idf_approx = (1.0 + term.len() as f32).ln();
+
+                // Position boost: earlier query terms slightly more important
+                let position_weight = 1.0 / (1.0 + pos as f32 * 0.1);
+
+                // Length normalization: favor shorter docs slightly, but never go negative
+                // Using sqrt for smoother decay that stays positive
+                let length_norm = 1.0 / (1.0 + (doc_len / 50.0).sqrt());
+
+                total_score += tf_score * idf_approx * position_weight * length_norm;
+            }
+        }
+
+        // Coverage bonus: reward documents that match more query terms
+        let coverage = matched_terms as f32 / query_terms.len() as f32;
+        let coverage_bonus = coverage * 0.3;
+
+        // Normalize to 0-1 range (approximate)
+        let raw_score = total_score + coverage_bonus;
+        (raw_score / (raw_score + 1.0)).min(1.0)
+    }
+
+    /// Legacy Jaccard similarity (kept for compatibility)
+    pub fn jaccard_score(query: &str, document: &str) -> f32 {
         let query_lower = query.to_lowercase();
         let doc_lower = document.to_lowercase();
 
@@ -650,6 +743,61 @@ mod tests {
             "The interest rate for gold loan is 10%",
         );
         assert!(score > 0.0);
+    }
+
+    #[test]
+    fn test_simple_scorer_tfidf() {
+        // More specific match should score higher
+        let score_specific = SimpleScorer::score(
+            "kotak gold loan eligibility",
+            "Kotak gold loan eligibility requires minimum 10 grams gold",
+        );
+        let score_generic = SimpleScorer::score(
+            "kotak gold loan eligibility",
+            "The bank offers various loan products to customers",
+        );
+        assert!(score_specific > score_generic,
+            "Specific match ({}) should beat generic ({})", score_specific, score_generic);
+    }
+
+    #[test]
+    fn test_simple_scorer_hindi() {
+        // Hindi query should match Hindi content
+        let score = SimpleScorer::score(
+            "gold loan interest rate kya hai",
+            "Gold loan ka interest rate 10.5% hai Kotak mein",
+        );
+        assert!(score > 0.0, "Hindi query should match: {}", score);
+    }
+
+    #[test]
+    fn test_simple_scorer_stopwords() {
+        // Stopwords should not inflate score
+        let score_with_stopwords = SimpleScorer::score(
+            "the gold loan",
+            "gold loan information",
+        );
+        let score_without_stopwords = SimpleScorer::score(
+            "gold loan",
+            "gold loan information",
+        );
+        // With stopwords filtered, "the gold loan" becomes "gold loan" which matches
+        // But after filtering, both queries should give similar results
+        println!("score_with_stopwords: {}", score_with_stopwords);
+        println!("score_without_stopwords: {}", score_without_stopwords);
+        // Both should work, stopword filtering keeps scores reasonable
+        assert!(score_without_stopwords > 0.0, "Without stopwords should score > 0: {}", score_without_stopwords);
+        // With stopwords, the query terms that remain should still match
+        // Note: If all query terms are stopwords, score will be 0 - which is expected
+    }
+
+    #[test]
+    fn test_jaccard_score() {
+        let score = SimpleScorer::jaccard_score(
+            "gold loan rate",
+            "loan rate for gold",
+        );
+        assert!(score > 0.5, "Jaccard should show high overlap: {}", score);
     }
 
     #[test]

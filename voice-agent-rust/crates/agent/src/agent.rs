@@ -31,6 +31,8 @@ pub struct AgentConfig {
     pub tools_enabled: bool,
     /// P1 FIX: Configurable tool defaults (no more hardcoded values)
     pub tool_defaults: ToolDefaults,
+    /// P2 FIX: Context window size in tokens (for LLM prompt truncation)
+    pub context_window_tokens: usize,
 }
 
 /// P1 FIX: Configurable default values for tool calls
@@ -69,6 +71,9 @@ impl Default for AgentConfig {
             rag_enabled: true,
             tools_enabled: true,
             tool_defaults: ToolDefaults::default(),
+            // P2 FIX: Default context window for typical LLMs (Llama 3, etc.)
+            // 4096 tokens leaves room for response generation
+            context_window_tokens: 4096,
         }
     }
 }
@@ -437,7 +442,9 @@ impl GoldLoanAgent {
         // Add current user message
         builder = builder.user_message(user_input);
 
-        let messages = builder.build();
+        // P2 FIX: Use context window limit to truncate conversation history
+        // This prevents context overflow errors with long conversations
+        let messages = builder.build_with_limit(self.config.context_window_tokens);
 
         // Try to use LLM backend if available
         if let Some(ref llm) = self.llm {
@@ -470,6 +477,11 @@ impl GoldLoanAgent {
     }
 
     /// Generate mock response (placeholder for LLM)
+    /// P2 FIX: Language-aware mock responses
+    ///
+    /// Generates fallback responses based on configured language:
+    /// - "hi" or "hi-IN": Hinglish (Hindi + English mix)
+    /// - "en" or "en-IN": English
     fn generate_mock_response(&self, _user_input: &str, tool_result: Option<&str>) -> String {
         let stage = self.conversation.stage();
 
@@ -482,31 +494,65 @@ impl GoldLoanAgent {
             }
         }
 
-        // Stage-based responses
+        let name = &self.config.persona.name;
+        let is_english = self.config.language.starts_with("en");
+
+        // P2 FIX: Stage-based responses with language awareness
         match stage {
             ConversationStage::Greeting => {
-                format!(
-                    "Namaste! Main {} hoon, Kotak Mahindra Bank se. Aapki kya madad kar sakti hoon aaj?",
-                    self.config.persona.name
-                )
+                if is_english {
+                    format!(
+                        "Hello! I'm {}, calling from Kotak Mahindra Bank. How may I assist you today?",
+                        name
+                    )
+                } else {
+                    format!(
+                        "Namaste! Main {} hoon, Kotak Mahindra Bank se. Aapki kya madad kar sakti hoon aaj?",
+                        name
+                    )
+                }
             }
             ConversationStage::Discovery => {
-                "Achha, aap batayein, aapka abhi kahan se gold loan hai? Main aapko dekhti hoon ki hum aapki kaise madad kar sakte hain.".to_string()
+                if is_english {
+                    "I'd like to understand your needs better. Do you currently have a gold loan with another lender?".to_string()
+                } else {
+                    "Achha, aap batayein, aapka abhi kahan se gold loan hai? Main aapko dekhti hoon ki hum aapki kaise madad kar sakte hain.".to_string()
+                }
             }
             ConversationStage::Qualification => {
-                "Bahut achha. Aapke paas kitna gold pledged hai abhi? Aur current rate kya chal raha hai?".to_string()
+                if is_english {
+                    "That's helpful. Could you tell me how much gold you have pledged currently? And what interest rate are you paying?".to_string()
+                } else {
+                    "Bahut achha. Aapke paas kitna gold pledged hai abhi? Aur current rate kya chal raha hai?".to_string()
+                }
             }
             ConversationStage::Presentation => {
-                "Dekhiye, Kotak mein aapko sirf 10.5% rate milega, jo NBFC ke 18-20% se bahut kam hai. Aur hamare yahan RBI regulated bank ki security bhi hai. Aap interested hain?".to_string()
+                if is_english {
+                    "At Kotak, we offer just 10.5% interest rate, which is much lower than the 18-20% NBFCs charge. Plus, you get the security of an RBI regulated bank. Would you be interested?".to_string()
+                } else {
+                    "Dekhiye, Kotak mein aapko sirf 10.5% rate milega, jo NBFC ke 18-20% se bahut kam hai. Aur hamare yahan RBI regulated bank ki security bhi hai. Aap interested hain?".to_string()
+                }
             }
             ConversationStage::ObjectionHandling => {
-                "Main samajh sakti hoon aapki chinta. Lekin dekhiye, hum ek bridge loan dete hain jo aapke transfer process ko seamless banata hai. Aapka gold kabhi bhi unprotected nahi rehta.".to_string()
+                if is_english {
+                    "I understand your concern. We offer a bridge loan facility that makes the transfer process seamless. Your gold is never left unprotected during the transition.".to_string()
+                } else {
+                    "Main samajh sakti hoon aapki chinta. Lekin dekhiye, hum ek bridge loan dete hain jo aapke transfer process ko seamless banata hai. Aapka gold kabhi bhi unprotected nahi rehta.".to_string()
+                }
             }
             ConversationStage::Closing => {
-                "Toh kya main aapke liye ek appointment schedule kar doon? Aap apne nearest branch mein aa sakte hain gold valuation ke liye.".to_string()
+                if is_english {
+                    "Shall I schedule an appointment for you? You can visit your nearest branch for gold valuation.".to_string()
+                } else {
+                    "Toh kya main aapke liye ek appointment schedule kar doon? Aap apne nearest branch mein aa sakte hain gold valuation ke liye.".to_string()
+                }
             }
             ConversationStage::Farewell => {
-                "Dhanyavaad aapka samay dene ke liye! Agar koi bhi sawal ho toh zaroor call karein. Have a nice day!".to_string()
+                if is_english {
+                    "Thank you for your time! If you have any questions, please don't hesitate to call us. Have a great day!".to_string()
+                } else {
+                    "Dhanyavaad aapka samay dene ke liye! Agar koi bhi sawal ho toh zaroor call karein. Have a nice day!".to_string()
+                }
             }
         }
     }
@@ -568,5 +614,39 @@ mod tests {
         let response = agent.process("I have a loan from Muthoot").await.unwrap();
 
         assert!(!response.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_agent_english_responses() {
+        // P2 FIX: Test language-aware mock responses
+        let config = AgentConfig {
+            language: "en".to_string(),
+            ..AgentConfig::default()
+        };
+        let agent = GoldLoanAgent::without_llm("test-english", config);
+
+        let response = agent.process("Hello").await.unwrap();
+
+        // English mode should produce English response
+        assert!(response.contains("Hello") || response.contains("assist"),
+            "Expected English response, got: {}", response);
+        assert!(!response.contains("Namaste"),
+            "Should not contain Hindi greeting in English mode");
+    }
+
+    #[tokio::test]
+    async fn test_agent_hindi_responses() {
+        // P2 FIX: Test language-aware mock responses
+        let config = AgentConfig {
+            language: "hi".to_string(),
+            ..AgentConfig::default()
+        };
+        let agent = GoldLoanAgent::without_llm("test-hindi", config);
+
+        let response = agent.process("Hello").await.unwrap();
+
+        // Hindi mode should produce Hinglish response
+        assert!(response.contains("Namaste") || response.contains("hoon"),
+            "Expected Hinglish response, got: {}", response);
     }
 }
