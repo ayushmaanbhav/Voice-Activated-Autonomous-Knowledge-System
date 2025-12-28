@@ -61,7 +61,7 @@ The pipeline crate handles the real-time audio processing chain:
 |------|-----------|--------|
 | ~~Vec::remove(0) O(n)~~ | `semantic.rs:88`, `decoder.rs:86` | ✅ FIXED - VecDeque with pop_front() |
 | Fake FFT in mel filterbank | `vad/magicnet.rs:400-416` | ❌ OPEN - Band averaging, not real FFT |
-| Error type lost in conversion | `lib.rs:69` | ❌ OPEN - All errors become Vad variant |
+| ~~Error type lost in conversion~~ | `lib.rs:69` | ✅ FIXED - Audio/Io/Model variants added to core |
 | No parallel STT + Turn Detection | `orchestrator.rs:195-216` | ❌ OPEN - Sequential when could be parallel |
 | ~~parse_words() O(n²)~~ | `tts/chunker.rs:94-125` | ✅ FIXED - Two-pass O(n) with boundaries |
 

@@ -124,7 +124,7 @@ This document tracks the implementation status and next steps for the Gold Loan 
 ### Reliability
 - [x] ~~Add retry logic with backoff~~ ✅ FIXED (LLM backend)
 - [x] ~~Add authentication middleware~~ ✅ FIXED (API key auth with config hot-reload)
-- [ ] Complete health check dependencies - ⚠️ PARTIAL (minimal impl)
+- [x] ~~Complete health check dependencies~~ ✅ FIXED (model/tool/LLM connectivity checks)
 - [ ] Add comprehensive integration tests - ❌ OPEN
 
 ---

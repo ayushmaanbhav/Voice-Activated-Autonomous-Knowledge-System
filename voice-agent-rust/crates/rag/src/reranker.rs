@@ -189,15 +189,21 @@ pub struct EarlyExitReranker {
 }
 
 /// Reranker statistics
-#[derive(Debug, Clone, Default)]
+///
+/// P2 FIX: exits_per_layer is now properly tracked:
+/// - Index 0: Documents that exited at pre-filter stage
+/// - Index 1+: Documents that passed pre-filter (full model runs)
+/// Note: True layer-by-layer early exit is not possible with ONNX,
+/// so we use a 2-stage model (pre-filter vs full model).
+#[derive(Debug, Clone)]
 pub struct RerankerStats {
     /// Total documents reranked
     pub total_docs: usize,
-    /// Early exits per layer
+    /// Early exits per layer (index 0 = pre-filter, index 1 = full model)
     pub exits_per_layer: Vec<usize>,
-    /// Average exit layer
+    /// Average exit layer (0.0 = all pre-filtered, 1.0 = all full model)
     pub avg_exit_layer: f32,
-    /// Documents that ran all layers
+    /// Documents that ran all layers (full model)
     pub full_runs: usize,
     // Cascaded reranking stats
     /// Documents filtered by pre-filter
@@ -210,6 +216,23 @@ pub struct RerankerStats {
     pub total_calls: usize,
     /// Average docs per call sent to full model
     pub avg_full_model_docs: f32,
+}
+
+impl Default for RerankerStats {
+    fn default() -> Self {
+        Self {
+            total_docs: 0,
+            // P2 FIX: Initialize with 2 layers: pre-filter (0) and full model (1)
+            exits_per_layer: vec![0, 0],
+            avg_exit_layer: 0.0,
+            full_runs: 0,
+            prefilter_filtered: 0,
+            full_model_runs: 0,
+            early_terminations: 0,
+            total_calls: 0,
+            avg_full_model_docs: 0.0,
+        }
+    }
 }
 
 impl EarlyExitReranker {
@@ -403,12 +426,30 @@ impl EarlyExitReranker {
         let mut stats = self.stats.lock();
         stats.total_calls += 1;
         stats.prefilter_filtered += filtered_count;
+
+        // P2 FIX: Update exits_per_layer
+        // Layer 0 = pre-filter exits, Layer 1 = full model runs
+        let full_model_count = results.iter().filter(|r| r.exit_layer != Some(0)).count();
+        if stats.exits_per_layer.len() >= 2 {
+            stats.exits_per_layer[0] += filtered_count;
+            stats.exits_per_layer[1] += full_model_count;
+        }
+
+        // P2 FIX: Update avg_exit_layer properly
+        // 0.0 = all pre-filtered, 1.0 = all full model
+        let total_this_call = filtered_count + full_model_count;
+        if total_this_call > 0 {
+            let this_avg = full_model_count as f32 / total_this_call as f32;
+            // Running average
+            stats.avg_exit_layer = (stats.avg_exit_layer * (stats.total_calls - 1) as f32 + this_avg)
+                / stats.total_calls as f32;
+        }
+
         // full_model_runs is updated by score_pair, so just track early terminations
         if early_terminated {
             stats.early_terminations += 1;
         }
         // Update running average of docs sent to full model
-        let full_model_count = results.iter().filter(|r| r.exit_layer != Some(0)).count();
         stats.avg_full_model_docs = (stats.avg_full_model_docs * (stats.total_calls - 1) as f32
             + full_model_count as f32)
             / stats.total_calls as f32;

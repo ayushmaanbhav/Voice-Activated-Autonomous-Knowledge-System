@@ -95,6 +95,18 @@ pub enum PipelineError {
 
     #[error("Pipeline not initialized")]
     NotInitialized,
+
+    /// P2 FIX: Added Audio variant for proper error type preservation
+    #[error("Audio processing error: {0}")]
+    Audio(String),
+
+    /// P2 FIX: Added Io variant for proper error type preservation
+    #[error("IO error: {0}")]
+    Io(String),
+
+    /// P2 FIX: Added Model variant for model loading/inference errors
+    #[error("Model error: {0}")]
+    Model(String),
 }
 
 /// Model/inference errors

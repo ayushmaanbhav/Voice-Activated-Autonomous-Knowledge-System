@@ -78,12 +78,13 @@ impl From<PipelineError> for voice_agent_core::Error {
             PipelineError::TurnDetection(msg) => CorePipelineError::TurnDetection(msg),
             PipelineError::Stt(msg) => CorePipelineError::Stt(msg),
             PipelineError::Tts(msg) => CorePipelineError::Tts(msg),
-            PipelineError::Model(msg) => CorePipelineError::Stt(format!("Model: {}", msg)),
+            // P2 FIX: Use proper variants now that core has Audio, Io, Model
+            PipelineError::Model(msg) => CorePipelineError::Model(msg),
             PipelineError::ChannelClosed => CorePipelineError::ChannelClosed,
             PipelineError::Timeout => CorePipelineError::Timeout(0),
             PipelineError::NotInitialized => CorePipelineError::NotInitialized,
-            PipelineError::Audio(msg) => CorePipelineError::Vad(format!("Audio: {}", msg)),
-            PipelineError::Io(msg) => CorePipelineError::Stt(format!("IO: {}", msg)),
+            PipelineError::Audio(msg) => CorePipelineError::Audio(msg),
+            PipelineError::Io(msg) => CorePipelineError::Io(msg),
         };
 
         voice_agent_core::Error::Pipeline(core_err)

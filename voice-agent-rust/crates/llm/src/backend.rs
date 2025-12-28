@@ -152,7 +152,8 @@ pub trait LlmBackend: Send + Sync {
 /// P0 FIX: Now supports KV cache for multi-turn conversations.
 /// The context is stored internally and reused across calls within a session.
 ///
-/// P2 FIX: Now derives Clone for better composability.
+/// P2 FIX: Added Clone for composability (e.g., sharing backend across agents).
+/// reqwest::Client and Arc<Mutex<_>> are both Clone-safe.
 #[derive(Clone)]
 pub struct OllamaBackend {
     client: Client,

@@ -265,24 +265,104 @@ async fn call_tool(
     }
 }
 
-/// Health check
-async fn health_check() -> impl IntoResponse {
-    Json(serde_json::json!({
-        "status": "healthy",
+/// P2 FIX: Enhanced health check that verifies actual dependencies
+async fn health_check(
+    State(state): State<AppState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let config = state.get_config();
+    let mut checks = serde_json::Map::new();
+    let mut all_healthy = true;
+
+    // Check 1: Tool registry initialized
+    let tool_count = state.tools.list_tools().len();
+    checks.insert("tools".to_string(), serde_json::json!({
+        "status": if tool_count > 0 { "ok" } else { "degraded" },
+        "count": tool_count
+    }));
+
+    // Check 2: VAD model exists
+    let vad_path = std::path::Path::new(&config.models.vad);
+    let vad_ok = vad_path.exists();
+    checks.insert("vad_model".to_string(), serde_json::json!({
+        "status": if vad_ok { "ok" } else { "missing" },
+        "path": config.models.vad.clone()
+    }));
+    if !vad_ok { all_healthy = false; }
+
+    // Check 3: TTS model
+    let tts_path = std::path::Path::new(&config.models.tts);
+    let tts_ok = tts_path.exists() || tts_path.parent().map(|p| p.exists()).unwrap_or(false);
+    checks.insert("tts_model".to_string(), serde_json::json!({
+        "status": if tts_ok { "ok" } else { "missing" },
+        "path": config.models.tts.clone()
+    }));
+
+    // Check 4: STT model
+    let stt_path = std::path::Path::new(&config.models.stt);
+    let stt_ok = stt_path.exists() || stt_path.parent().map(|p| p.exists()).unwrap_or(false);
+    checks.insert("stt_model".to_string(), serde_json::json!({
+        "status": if stt_ok { "ok" } else { "missing" },
+        "path": config.models.stt.clone()
+    }));
+
+    drop(config);
+
+    let status = if all_healthy { "healthy" } else { "degraded" };
+    let status_code = if all_healthy { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+
+    (status_code, Json(serde_json::json!({
+        "status": status,
         "version": env!("CARGO_PKG_VERSION"),
-    }))
+        "checks": checks
+    })))
 }
 
-/// Readiness check
+/// P2 FIX: Enhanced readiness check with LLM backend connectivity
 async fn readiness_check(
     State(state): State<AppState>,
-) -> impl IntoResponse {
+) -> (StatusCode, Json<serde_json::Value>) {
     let session_count = state.sessions.count();
 
-    Json(serde_json::json!({
-        "status": "ready",
-        "sessions": session_count,
-    }))
+    // Extract config values before any await - parking_lot guards aren't Send
+    let llm_endpoint = {
+        let config = state.get_config();
+        config.agent.llm.endpoint.clone()
+    };
+
+    let mut checks = serde_json::Map::new();
+    let mut ready = true;
+
+    // Check 1: Sessions system
+    checks.insert("sessions".to_string(), serde_json::json!({
+        "status": "ok",
+        "count": session_count
+    }));
+
+    // Check 2: LLM backend (Ollama) connectivity
+    let llm_url = format!("{}/api/tags", llm_endpoint);
+
+    let llm_status = match tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        reqwest::get(&llm_url)
+    ).await {
+        Ok(Ok(resp)) if resp.status().is_success() => "ok",
+        Ok(Ok(_)) => { ready = false; "error" },
+        Ok(Err(_)) => { ready = false; "unreachable" },
+        Err(_) => { ready = false; "timeout" },
+    };
+
+    checks.insert("llm_backend".to_string(), serde_json::json!({
+        "status": llm_status,
+        "url": llm_url
+    }));
+
+    let status = if ready { "ready" } else { "not_ready" };
+    let status_code = if ready { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+
+    (status_code, Json(serde_json::json!({
+        "status": status,
+        "checks": checks
+    })))
 }
 
 /// P1 FIX: Config reload endpoint

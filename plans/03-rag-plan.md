@@ -57,8 +57,8 @@ The RAG crate handles retrieval-augmented generation:
 | ~~Hardcoded prefetch params~~ | `retriever.rs:264-284` | ✅ FIXED - Configurable via RetrieverConfig |
 | ~~SimpleScorer too naive~~ | `reranker.rs:606-722` | ✅ FIXED - TF-IDF with stopwords, position weighting |
 | SimpleEmbedder is hash-based | `embeddings.rs:225-231` | ⚠️ Expected - Only for testing |
-| Stats not updated | `reranker.rs:251-253` | ❌ OPEN - exits_per_layer never populated |
-| Hardcoded output name | `embeddings.rs:169-171` | ❌ OPEN - Assumes last_hidden_state |
+| ~~Stats not updated~~ | `reranker.rs:251-253` | ✅ FIXED - exits_per_layer populated in cascaded rerank |
+| ~~Hardcoded output name~~ | `embeddings.rs:169-171` | ✅ FIXED - Configurable via EmbeddingConfig.output_name |
 
 ---
 

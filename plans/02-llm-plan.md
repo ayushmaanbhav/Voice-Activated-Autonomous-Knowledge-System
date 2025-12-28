@@ -57,7 +57,7 @@ The LLM crate handles language model inference with speculative execution:
 | Task | File:Line | Status |
 |------|-----------|--------|
 | Missing Claude/OpenAI Backends | `backend.rs:1-4` | ❌ OPEN - Only Ollama implemented |
-| No Clone for OllamaBackend | `backend.rs:103` | ❌ OPEN - Limits composability |
+| ~~No Clone for OllamaBackend~~ | `backend.rs:103` | ✅ FIXED - #[derive(Clone)] added |
 | Statistics precision | `speculative.rs:533-534` | ❌ OPEN - Use Welford's algorithm |
 | ~~Unicode word boundaries~~ | `streaming.rs:133-147` | ✅ FIXED - Hindi danda (।॥) support |
 | ~~Missing Tool role~~ | `prompt.rs:14-22` | ✅ FIXED - Role::Tool added |
