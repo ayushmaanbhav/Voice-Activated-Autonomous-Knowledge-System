@@ -4,9 +4,11 @@
 
 mod detect;
 mod noop;
+mod grpc;
 
 pub use detect::ScriptDetector;
 pub use noop::NoopTranslator;
+pub use grpc::{GrpcTranslator, GrpcTranslatorConfig, FallbackTranslator};
 
 use voice_agent_core::{Translator, Language};
 use std::sync::Arc;
@@ -58,11 +60,45 @@ impl Default for TranslationConfig {
 pub fn create_translator(config: &TranslationConfig) -> Arc<dyn Translator> {
     match config.provider {
         TranslationProvider::Grpc => {
-            // TODO: Implement gRPC translator when needed
-            tracing::warn!("gRPC translator not yet implemented, using noop");
-            Arc::new(NoopTranslator::new())
+            let grpc_config = GrpcTranslatorConfig {
+                endpoint: config.grpc_endpoint.clone(),
+                ..Default::default()
+            };
+            let grpc_translator = Arc::new(GrpcTranslator::new(grpc_config));
+
+            // If fallback is enabled, wrap with FallbackTranslator using noop as primary
+            // (in case we want to try local ONNX first in the future)
+            if config.fallback_to_grpc {
+                tracing::info!(
+                    endpoint = %config.grpc_endpoint,
+                    "Using gRPC translator with fallback enabled"
+                );
+            } else {
+                tracing::info!(
+                    endpoint = %config.grpc_endpoint,
+                    "Using gRPC translator (fallback disabled)"
+                );
+            }
+            grpc_translator
         }
         TranslationProvider::Disabled => Arc::new(NoopTranslator::new()),
+    }
+}
+
+/// Create a fallback translator that tries ONNX first, then gRPC
+pub fn create_fallback_translator(
+    primary: Arc<dyn Translator>,
+    config: &TranslationConfig,
+) -> Arc<dyn Translator> {
+    if config.fallback_to_grpc && matches!(config.provider, TranslationProvider::Grpc) {
+        let grpc_config = GrpcTranslatorConfig {
+            endpoint: config.grpc_endpoint.clone(),
+            ..Default::default()
+        };
+        let fallback = Arc::new(GrpcTranslator::new(grpc_config));
+        Arc::new(FallbackTranslator::new(primary, fallback))
+    } else {
+        primary
     }
 }
 

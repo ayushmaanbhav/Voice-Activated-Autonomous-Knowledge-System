@@ -37,6 +37,7 @@ pub use orchestrator::{VoicePipeline, PipelineConfig, PipelineEvent, PipelineSta
 // Processor exports
 pub use processors::{
     SentenceDetector, SentenceDetectorConfig,
+    TtsProcessor, TtsProcessorConfig,
     InterruptHandler, InterruptMode, InterruptHandlerConfig,
     ProcessorChain, ProcessorChainBuilder,
 };

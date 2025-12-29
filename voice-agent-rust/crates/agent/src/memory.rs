@@ -24,6 +24,12 @@ pub struct MemoryConfig {
     pub max_episodic_summaries: usize,
     /// Enable semantic memory
     pub semantic_memory_enabled: bool,
+    /// P1 FIX: Maximum total tokens before aggressive truncation
+    pub max_context_tokens: usize,
+    /// P1 FIX: High watermark - trigger summarization when exceeded
+    pub high_watermark_tokens: usize,
+    /// P1 FIX: Low watermark - target after truncation
+    pub low_watermark_tokens: usize,
 }
 
 impl Default for MemoryConfig {
@@ -33,8 +39,31 @@ impl Default for MemoryConfig {
             summarization_threshold: 6,
             max_episodic_summaries: 10,
             semantic_memory_enabled: true,
+            // P1 FIX: Token-based limits (assuming ~4 chars per token)
+            max_context_tokens: 4096,      // Hard limit
+            high_watermark_tokens: 3072,   // 75% - trigger summarization
+            low_watermark_tokens: 2048,    // 50% - target after cleanup
         }
     }
+}
+
+/// P1 FIX: Memory usage statistics
+#[derive(Debug, Clone, Default)]
+pub struct MemoryStats {
+    /// Estimated total tokens in memory
+    pub estimated_tokens: usize,
+    /// Total characters in memory
+    pub total_chars: usize,
+    /// Number of working memory entries
+    pub working_entries: usize,
+    /// Number of episodic summaries
+    pub episodic_entries: usize,
+    /// Number of semantic facts
+    pub semantic_facts: usize,
+    /// Whether high watermark is exceeded
+    pub above_high_watermark: bool,
+    /// Whether max limit is exceeded
+    pub above_max_limit: bool,
 }
 
 /// Memory entry
@@ -402,6 +431,121 @@ Summary:"#,
     /// Get total turns
     pub fn total_turns(&self) -> usize {
         *self.total_turns.read()
+    }
+
+    /// P1 FIX: Get memory statistics
+    pub fn get_stats(&self) -> MemoryStats {
+        let working = self.working.read();
+        let episodic = self.episodic.read();
+        let semantic = self.semantic.read();
+
+        let working_chars: usize = working.iter().map(|e| e.content.len()).sum();
+        let episodic_chars: usize = episodic.iter().map(|e| e.summary.len()).sum();
+        let semantic_chars: usize = semantic.values().map(|f| f.value.len()).sum();
+
+        let total_chars = working_chars + episodic_chars + semantic_chars;
+        // Rough estimate: ~4 characters per token
+        let estimated_tokens = total_chars / 4;
+
+        MemoryStats {
+            estimated_tokens,
+            total_chars,
+            working_entries: working.len(),
+            episodic_entries: episodic.len(),
+            semantic_facts: semantic.len(),
+            above_high_watermark: estimated_tokens > self.config.high_watermark_tokens,
+            above_max_limit: estimated_tokens > self.config.max_context_tokens,
+        }
+    }
+
+    /// P1 FIX: Check if memory needs cleanup (above high watermark)
+    pub fn needs_cleanup(&self) -> bool {
+        self.get_stats().above_high_watermark
+    }
+
+    /// P1 FIX: Perform aggressive memory cleanup to get below low watermark
+    ///
+    /// This is called when memory exceeds the high watermark.
+    /// It will:
+    /// 1. Force summarization of all working memory
+    /// 2. Remove oldest episodic summaries
+    /// 3. Remove low-confidence semantic facts
+    pub fn cleanup_to_watermark(&self) {
+        let stats = self.get_stats();
+        if !stats.above_high_watermark {
+            return;
+        }
+
+        tracing::info!(
+            tokens = stats.estimated_tokens,
+            high_watermark = self.config.high_watermark_tokens,
+            "Memory cleanup triggered"
+        );
+
+        // 1. Force summarize all working memory except last 2 entries
+        {
+            let mut working = self.working.write();
+            let len = working.len();
+            if len > 2 {
+                let to_summarize: Vec<MemoryEntry> = working.drain(..len - 2).collect();
+                drop(working); // Release lock before creating summary
+                self.create_simple_summary(to_summarize);
+            }
+        }
+
+        // 2. Remove oldest episodic summaries if still over limit
+        loop {
+            let stats = self.get_stats();
+            if stats.estimated_tokens <= self.config.low_watermark_tokens {
+                break;
+            }
+
+            let mut episodic = self.episodic.write();
+            if episodic.len() <= 1 {
+                break; // Keep at least one summary for context
+            }
+            episodic.pop_front();
+            tracing::debug!("Removed oldest episodic summary");
+        }
+
+        // 3. Remove low-confidence semantic facts if still over limit
+        {
+            let stats = self.get_stats();
+            if stats.estimated_tokens > self.config.low_watermark_tokens {
+                let mut semantic = self.semantic.write();
+                let low_confidence_keys: Vec<String> = semantic.iter()
+                    .filter(|(_, f)| f.confidence < 0.5)
+                    .map(|(k, _)| k.clone())
+                    .collect();
+
+                for key in low_confidence_keys {
+                    semantic.remove(&key);
+                    tracing::debug!("Removed low-confidence fact: {}", key);
+                }
+            }
+        }
+
+        let final_stats = self.get_stats();
+        tracing::info!(
+            tokens_before = stats.estimated_tokens,
+            tokens_after = final_stats.estimated_tokens,
+            "Memory cleanup completed"
+        );
+    }
+
+    /// P1 FIX: Get context with size limit
+    ///
+    /// Returns context string truncated to approximately max_tokens.
+    pub fn get_context_limited(&self, max_tokens: usize) -> String {
+        let full_context = self.get_context();
+        let max_chars = max_tokens * 4; // Rough estimate
+
+        if full_context.len() <= max_chars {
+            return full_context;
+        }
+
+        // Truncate at word boundary
+        Self::truncate_at_word_boundary(&full_context, max_chars)
     }
 
     /// P2 FIX: Truncate text at word boundary to avoid cutting mid-word

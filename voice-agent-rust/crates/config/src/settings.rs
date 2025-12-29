@@ -6,10 +6,39 @@ use std::path::Path;
 
 use crate::{AgentConfig, ConfigError, GoldLoanConfig, PipelineConfig};
 
+/// P1 FIX: Runtime environment enum
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeEnvironment {
+    /// Development mode - relaxed validation, warnings only
+    #[default]
+    Development,
+    /// Staging mode - stricter validation
+    Staging,
+    /// Production mode - all validations enforced
+    Production,
+}
+
+impl RuntimeEnvironment {
+    /// Check if this is a production environment
+    pub fn is_production(&self) -> bool {
+        matches!(self, Self::Production)
+    }
+
+    /// Check if strict validation should be applied
+    pub fn is_strict(&self) -> bool {
+        matches!(self, Self::Production | Self::Staging)
+    }
+}
+
 /// Main application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(Default)]
 pub struct Settings {
+    /// P1 FIX: Runtime environment (development, staging, production)
+    #[serde(default)]
+    pub environment: RuntimeEnvironment,
+
     /// Server configuration
     #[serde(default)]
     pub server: ServerConfig,
@@ -61,48 +90,93 @@ impl Settings {
         Ok(())
     }
 
-    /// P2 FIX: Validate all model paths with proper extension checking
+    /// P1 FIX: Validate all model paths with environment-aware strictness
+    ///
+    /// In production/staging: Missing required models cause errors
+    /// In development: Missing models only cause warnings
     fn validate_model_paths(&self) -> Result<(), ConfigError> {
-        let model_checks = [
+        // Required models - must exist in production
+        let required_models = [
             ("models.vad", &self.models.vad, Some(".onnx")),
+            ("models.stt", &self.models.stt, Some(".onnx")),
+            ("models.tts", &self.models.tts, Some(".onnx")),
+        ];
+
+        // Optional models - warnings only
+        let optional_models = [
             ("models.turn_detection", &self.models.turn_detection, Some(".onnx")),
             ("models.turn_detection_tokenizer", &self.models.turn_detection_tokenizer, Some(".json")),
-            ("models.stt", &self.models.stt, Some(".onnx")),
             ("models.stt_tokens", &self.models.stt_tokens, Some(".txt")),
-            ("models.tts", &self.models.tts, Some(".onnx")),
             ("models.reranker", &self.models.reranker, Some(".onnx")),
             ("models.embeddings", &self.models.embeddings, Some(".onnx")),
         ];
 
+        let mut errors = Vec::new();
         let mut warnings = Vec::new();
 
-        for (field, path, expected_ext) in model_checks {
+        // Validate required models
+        for (field, path, expected_ext) in required_models {
             if path.is_empty() {
+                if self.environment.is_strict() {
+                    errors.push(format!("{}: path is required in {} mode", field,
+                        if self.environment.is_production() { "production" } else { "staging" }));
+                } else {
+                    tracing::warn!("{}: path not configured (required for production)", field);
+                }
                 continue;
             }
 
             // Check file extension
             if let Some(ext) = expected_ext {
                 if !path.ends_with(ext) {
-                    warnings.push(format!(
-                        "{}: expected {} extension, got '{}'",
-                        field, ext, path
-                    ));
+                    warnings.push(format!("{}: expected {} extension, got '{}'", field, ext, path));
                 }
             }
 
-            // Check path exists (warn only, don't error - models may be downloaded later)
+            // Check path exists
             let path_obj = Path::new(path);
             if !path_obj.exists() {
-                tracing::warn!("Model not found: {} = {}", field, path);
+                if self.environment.is_strict() {
+                    errors.push(format!("{}: model file not found: {}", field, path));
+                } else {
+                    tracing::warn!("Model not found: {} = {}", field, path);
+                }
+            } else if !path_obj.is_file() {
+                errors.push(format!("{}: path exists but is not a file: {}", field, path));
+            }
+        }
+
+        // Validate optional models (warnings only)
+        for (field, path, expected_ext) in optional_models {
+            if path.is_empty() {
+                continue;
+            }
+
+            if let Some(ext) = expected_ext {
+                if !path.ends_with(ext) {
+                    warnings.push(format!("{}: expected {} extension, got '{}'", field, ext, path));
+                }
+            }
+
+            let path_obj = Path::new(path);
+            if !path_obj.exists() {
+                tracing::warn!("Optional model not found: {} = {}", field, path);
             } else if !path_obj.is_file() {
                 warnings.push(format!("{}: path exists but is not a file: {}", field, path));
             }
         }
 
-        // Report all warnings together
+        // Report warnings
         if !warnings.is_empty() {
-            tracing::warn!("Model path validation warnings:\n  - {}", warnings.join("\n  - "));
+            tracing::warn!("Model path warnings:\n  - {}", warnings.join("\n  - "));
+        }
+
+        // In production/staging, errors are fatal
+        if !errors.is_empty() {
+            return Err(ConfigError::InvalidValue {
+                field: "models".to_string(),
+                message: format!("Model validation failed:\n  - {}", errors.join("\n  - ")),
+            });
         }
 
         Ok(())
