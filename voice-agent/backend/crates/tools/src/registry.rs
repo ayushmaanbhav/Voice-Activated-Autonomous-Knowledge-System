@@ -287,6 +287,121 @@ pub fn create_registry_with_integrations(config: IntegrationConfig) -> ToolRegis
     registry
 }
 
+/// P2 FIX: Full configuration for tool registry with persistence
+///
+/// Includes both business integrations (CRM, Calendar) and persistence
+/// services (SMS, Gold Price) for production deployment.
+pub struct FullIntegrationConfig {
+    /// CRM integration for lead management
+    pub crm: Option<Arc<dyn crate::integrations::CrmIntegration>>,
+    /// Calendar integration for appointment scheduling
+    pub calendar: Option<Arc<dyn crate::integrations::CalendarIntegration>>,
+    /// SMS service for sending messages (persisted to ScyllaDB)
+    pub sms_service: Option<Arc<dyn voice_agent_persistence::SmsService>>,
+    /// Gold price service (persisted to ScyllaDB)
+    pub gold_price_service: Option<Arc<dyn voice_agent_persistence::GoldPriceService>>,
+}
+
+impl Default for FullIntegrationConfig {
+    fn default() -> Self {
+        Self {
+            crm: None,
+            calendar: None,
+            sms_service: None,
+            gold_price_service: None,
+        }
+    }
+}
+
+impl FullIntegrationConfig {
+    /// Create from persistence layer
+    pub fn from_persistence(persistence: &voice_agent_persistence::PersistenceLayer) -> Self {
+        Self {
+            crm: Some(Arc::new(crate::integrations::StubCrmIntegration::new())),
+            calendar: Some(Arc::new(crate::integrations::StubCalendarIntegration::new())),
+            sms_service: Some(Arc::new(persistence.sms.clone()) as Arc<dyn voice_agent_persistence::SmsService>),
+            gold_price_service: Some(Arc::new(persistence.gold_price.clone()) as Arc<dyn voice_agent_persistence::GoldPriceService>),
+        }
+    }
+
+    /// Set CRM integration
+    pub fn with_crm(mut self, crm: Arc<dyn crate::integrations::CrmIntegration>) -> Self {
+        self.crm = Some(crm);
+        self
+    }
+
+    /// Set calendar integration
+    pub fn with_calendar(mut self, calendar: Arc<dyn crate::integrations::CalendarIntegration>) -> Self {
+        self.calendar = Some(calendar);
+        self
+    }
+
+    /// Set SMS service
+    pub fn with_sms_service(mut self, sms: Arc<dyn voice_agent_persistence::SmsService>) -> Self {
+        self.sms_service = Some(sms);
+        self
+    }
+
+    /// Set gold price service
+    pub fn with_gold_price_service(mut self, price: Arc<dyn voice_agent_persistence::GoldPriceService>) -> Self {
+        self.gold_price_service = Some(price);
+        self
+    }
+}
+
+/// P2 FIX: Create registry with full persistence support
+///
+/// Creates a tool registry with:
+/// - Business integrations (CRM, Calendar)
+/// - Persistence services (SMS → ScyllaDB, Gold Price → ScyllaDB)
+/// - All MCP tools properly wired
+pub fn create_registry_with_persistence(config: FullIntegrationConfig) -> ToolRegistry {
+    let mut registry = ToolRegistry::new();
+
+    // Register gold loan tools (no persistence needed)
+    registry.register(crate::gold_loan::EligibilityCheckTool::new());
+    registry.register(crate::gold_loan::SavingsCalculatorTool::new());
+    registry.register(crate::gold_loan::BranchLocatorTool::new());
+
+    // LeadCaptureTool with CRM integration
+    if let Some(crm) = config.crm {
+        registry.register(crate::gold_loan::LeadCaptureTool::with_crm(crm));
+    } else {
+        registry.register(crate::gold_loan::LeadCaptureTool::new());
+    }
+
+    // AppointmentSchedulerTool with calendar integration
+    if let Some(calendar) = config.calendar {
+        registry.register(crate::gold_loan::AppointmentSchedulerTool::with_calendar(calendar));
+    } else {
+        registry.register(crate::gold_loan::AppointmentSchedulerTool::new());
+    }
+
+    // P2 FIX: GetGoldPriceTool with persistence service
+    if let Some(price_service) = config.gold_price_service {
+        registry.register(crate::gold_loan::GetGoldPriceTool::with_price_service(price_service));
+    } else {
+        registry.register(crate::gold_loan::GetGoldPriceTool::new());
+    }
+
+    // P2 FIX: EscalateToHumanTool (no persistence needed, logs via audit)
+    registry.register(crate::gold_loan::EscalateToHumanTool::new());
+
+    // P2 FIX: SendSmsTool with persistence service
+    if let Some(sms_service) = config.sms_service {
+        registry.register(crate::gold_loan::SendSmsTool::with_sms_service(sms_service));
+    } else {
+        registry.register(crate::gold_loan::SendSmsTool::new());
+    }
+
+    tracing::info!(
+        tools = registry.len(),
+        "Created tool registry with persistence support"
+    );
+
+    registry
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

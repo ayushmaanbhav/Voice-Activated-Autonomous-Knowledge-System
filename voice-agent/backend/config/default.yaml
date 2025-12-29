@@ -1,0 +1,145 @@
+# Voice Agent Default Configuration
+# Override with environment-specific files (development.yaml, production.yaml)
+# or environment variables (VOICE_AGENT__<SECTION>__<KEY>)
+
+# Runtime environment: development, staging, production
+environment: development
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  ws_path: "/ws/conversation"
+  max_connections: 1000
+  timeout_seconds: 30
+  cors_enabled: true
+  cors_origins: []  # Configure in production
+
+  # Rate limiting
+  rate_limit:
+    enabled: true
+    messages_per_second: 100
+    audio_bytes_per_second: 64000  # 16kHz * 2 bytes * 2
+    burst_multiplier: 2.0
+
+  # Authentication (disabled in development)
+  auth:
+    enabled: false
+    # api_key: set via VOICE_AGENT__SERVER__AUTH__API_KEY env var
+    public_paths:
+      - /health
+      - /ready
+      - /metrics
+
+  # WebRTC NAT traversal
+  stun_servers:
+    - "stun:stun.l.google.com:19302"
+    - "stun:stun1.l.google.com:19302"
+  # TURN servers for relay (configure for production)
+  turn_servers: []
+
+# Pipeline configuration
+pipeline:
+  latency_budget_ms: 500
+  enable_speculative_stt: true
+  enable_early_exit: true
+  vad:
+    threshold: 0.5
+    min_speech_ms: 250
+    min_silence_ms: 300
+    frame_ms: 30
+  turn_detection:
+    enabled: true
+    semantic_enabled: true
+    endpoint_threshold: 0.85
+    min_utterance_ms: 500
+    max_silence_ms: 1000
+
+# Agent configuration
+agent:
+  model: "claude-sonnet-4-20250514"
+  temperature: 0.7
+  max_tokens: 200
+  system_prompt_version: "1.0"
+  persona:
+    name: "Priya"
+    role: "Gold Loan Advisor"
+    language: "en"
+    personality: "warm and professional"
+
+# Gold loan business configuration
+gold_loan:
+  gold_price_per_gram: 7500.0
+  kotak_interest_rate: 10.5
+  ltv_percent: 75.0
+  min_loan_amount: 10000.0
+  max_loan_amount: 25000000.0
+  processing_fee_percent: 1.0
+
+  purity_factors:
+    k24: 1.0
+    k22: 0.916
+    k18: 0.75
+    k14: 0.585
+
+  tiered_rates:
+    tier1_rate: 11.5
+    tier1_threshold: 100000.0
+    tier2_rate: 10.5
+    tier2_threshold: 500000.0
+    tier3_rate: 9.5
+
+  competitor_rates:
+    muthoot: 18.0
+    manappuram: 19.0
+    iifl: 17.5
+    other_nbfc: 20.0
+
+# Model paths (relative to working directory)
+models:
+  vad: "models/vad/silero_vad.onnx"
+  turn_detection: "models/turn_detection/smollm2-135m.onnx"
+  turn_detection_tokenizer: "models/turn_detection/tokenizer.json"
+  stt: "models/stt/indicconformer.onnx"
+  stt_tokens: "models/stt/tokens.txt"
+  tts: "models/tts/indicf5.onnx"
+  reranker: "models/reranker/bge-reranker-v2-m3.onnx"
+  embeddings: "models/embeddings/e5-multilingual.onnx"
+
+# Observability
+observability:
+  log_level: "info"
+  log_json: false
+  tracing_enabled: true
+  # otlp_endpoint: "http://localhost:4317"  # Uncomment for OTLP
+  metrics_enabled: true
+  metrics_port: 9090
+
+# Feature flags
+features:
+  semantic_turn_detection: true
+  speculative_llm: true
+  early_exit_reranker: true
+  rag_prefetch: true
+  word_level_tts: true
+  barge_in_enabled: true
+
+# RAG configuration
+rag:
+  enabled: true
+  dense_top_k: 20
+  sparse_top_k: 20
+  final_top_k: 5
+  dense_weight: 0.7
+  rrf_k: 60.0
+  min_score: 0.4
+  reranking_enabled: true
+  prefilter_threshold: 0.15
+  max_full_model_docs: 10
+  early_termination_threshold: 0.92
+  early_termination_min_results: 3
+  prefetch_confidence_threshold: 0.6
+  prefetch_top_k: 3
+
+# Path to domain-specific configuration
+domain_config_path: "config/domain.yaml"

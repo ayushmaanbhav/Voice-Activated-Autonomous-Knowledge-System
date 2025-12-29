@@ -23,6 +23,7 @@ pub mod grammar;
 pub mod translation;
 pub mod pii;
 pub mod compliance;
+pub mod simplifier;  // P2 FIX: Text simplifier for TTS
 
 mod pipeline;
 mod error;
@@ -35,3 +36,4 @@ pub use grammar::{GrammarConfig, GrammarProvider, LLMGrammarCorrector, NoopCorre
 pub use translation::{TranslationConfig, TranslationProvider, ScriptDetector};
 pub use pii::{PIIConfig, PIIProvider, HybridPIIDetector, IndianPIIPatterns};
 pub use compliance::{ComplianceConfig, ComplianceProvider, RuleBasedComplianceChecker};
+pub use simplifier::{TextSimplifier, TextSimplifierConfig, NumberToWords, AbbreviationExpander};

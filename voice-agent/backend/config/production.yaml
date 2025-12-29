@@ -1,0 +1,54 @@
+# Voice Agent Production Configuration
+# Inherits from default.yaml, overrides production-specific settings
+
+environment: production
+
+server:
+  max_connections: 5000
+  timeout_seconds: 60
+  cors_enabled: true
+  # cors_origins: Configure via VOICE_AGENT__SERVER__CORS_ORIGINS env var
+
+  rate_limit:
+    enabled: true
+    messages_per_second: 50  # More conservative in production
+    audio_bytes_per_second: 48000
+    burst_multiplier: 1.5
+
+  auth:
+    enabled: true
+    # api_key: Set via VOICE_AGENT__SERVER__AUTH__API_KEY env var (required)
+
+  # TURN servers for production - configure for reliable connectivity
+  # turn_servers:
+  #   - url: "turn:turn.example.com:3478"
+  #     username: "user"
+  #     credential: "secret"
+
+pipeline:
+  latency_budget_ms: 400  # Tighter latency budget in production
+
+agent:
+  temperature: 0.6  # Slightly lower for more consistent responses
+  max_tokens: 150
+
+observability:
+  log_level: "warn"  # Less verbose in production
+  log_json: true     # JSON for log aggregation
+  tracing_enabled: true
+  # otlp_endpoint: Set via VOICE_AGENT__OBSERVABILITY__OTLP_ENDPOINT
+
+# Feature flags - more conservative in production
+features:
+  semantic_turn_detection: true
+  speculative_llm: true
+  early_exit_reranker: true
+  rag_prefetch: true
+  word_level_tts: true
+  barge_in_enabled: true
+
+# RAG - tuned for production performance
+rag:
+  enabled: true
+  max_full_model_docs: 8  # Limit for latency
+  prefetch_top_k: 2       # Smaller prefetch set
