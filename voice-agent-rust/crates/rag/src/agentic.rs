@@ -318,6 +318,291 @@ impl Default for SufficiencyChecker {
     }
 }
 
+// =============================================================================
+// P1 FIX: LLM-based Sufficiency Checking
+// =============================================================================
+
+/// Configuration for LLM-based sufficiency checking
+#[derive(Debug, Clone)]
+pub struct LlmSufficiencyConfig {
+    /// Minimum coverage score (0.0-1.0) to consider sufficient
+    pub min_coverage: f32,
+    /// Maximum tokens for LLM evaluation
+    pub max_eval_tokens: usize,
+    /// Temperature for evaluation (lower = more deterministic)
+    pub temperature: f32,
+    /// Number of documents to send for evaluation
+    pub top_k_for_eval: usize,
+    /// Whether to include heuristic score in final decision
+    pub use_heuristic_fallback: bool,
+}
+
+impl Default for LlmSufficiencyConfig {
+    fn default() -> Self {
+        Self {
+            min_coverage: 0.7,
+            max_eval_tokens: 150,
+            temperature: 0.1,
+            top_k_for_eval: 5,
+            use_heuristic_fallback: true,
+        }
+    }
+}
+
+/// P1 FIX: LLM-based sufficiency evaluation result
+#[derive(Debug, Clone)]
+pub struct SufficiencyEvaluation {
+    /// Whether documents are sufficient to answer the query
+    pub sufficient: bool,
+    /// Coverage score (0.0-1.0) - how well documents cover the query
+    pub coverage: f32,
+    /// What information is missing (if any)
+    pub missing: Option<String>,
+    /// Suggested refined query (if coverage is low)
+    pub refined_query: Option<String>,
+    /// Confidence in the evaluation
+    pub confidence: f32,
+    /// Method used for evaluation (heuristic or llm)
+    pub method: String,
+}
+
+impl Default for SufficiencyEvaluation {
+    fn default() -> Self {
+        Self {
+            sufficient: false,
+            coverage: 0.0,
+            missing: None,
+            refined_query: None,
+            confidence: 0.5,
+            method: "heuristic".to_string(),
+        }
+    }
+}
+
+/// P1 FIX: LLM-enhanced sufficiency checker
+///
+/// Uses LLM to evaluate whether retrieved documents can answer the query.
+/// Falls back to heuristic scoring if LLM is not available or fails.
+pub struct LlmSufficiencyChecker {
+    llm: Option<Arc<dyn LlmBackend>>,
+    config: LlmSufficiencyConfig,
+    heuristic_checker: SufficiencyChecker,
+}
+
+impl LlmSufficiencyChecker {
+    /// Create a new LLM sufficiency checker with heuristic fallback only
+    pub fn new() -> Self {
+        Self {
+            llm: None,
+            config: LlmSufficiencyConfig::default(),
+            heuristic_checker: SufficiencyChecker::new(),
+        }
+    }
+
+    /// Create with LLM backend for enhanced evaluation
+    pub fn with_llm(llm: Arc<dyn LlmBackend>) -> Self {
+        Self {
+            llm: Some(llm),
+            config: LlmSufficiencyConfig::default(),
+            heuristic_checker: SufficiencyChecker::new(),
+        }
+    }
+
+    /// Create with custom configuration
+    pub fn with_config(llm: Option<Arc<dyn LlmBackend>>, config: LlmSufficiencyConfig) -> Self {
+        Self {
+            llm,
+            config,
+            heuristic_checker: SufficiencyChecker::new(),
+        }
+    }
+
+    /// Evaluate sufficiency of documents for a query
+    ///
+    /// Uses LLM if available, otherwise falls back to heuristic scoring.
+    pub async fn evaluate(
+        &self,
+        query: &str,
+        results: &[SearchResult],
+    ) -> Result<SufficiencyEvaluation, RagError> {
+        // Quick path: empty results
+        if results.is_empty() {
+            return Ok(SufficiencyEvaluation {
+                sufficient: false,
+                coverage: 0.0,
+                missing: Some("No documents retrieved".to_string()),
+                refined_query: Some(query.to_string()),
+                confidence: 1.0,
+                method: "empty_check".to_string(),
+            });
+        }
+
+        // Get heuristic score first
+        let heuristic_score = self.heuristic_checker.score(results, query);
+
+        // If no LLM, return heuristic result
+        let llm = match &self.llm {
+            Some(llm) => llm,
+            None => {
+                return Ok(SufficiencyEvaluation {
+                    sufficient: heuristic_score >= self.config.min_coverage,
+                    coverage: heuristic_score,
+                    missing: None,
+                    refined_query: None,
+                    confidence: 0.6, // Lower confidence for heuristic
+                    method: "heuristic".to_string(),
+                });
+            }
+        };
+
+        // Build document context for LLM
+        let doc_context = results
+            .iter()
+            .take(self.config.top_k_for_eval)
+            .enumerate()
+            .map(|(i, r)| format!("[Doc {}] {}", i + 1, Self::truncate_text(&r.text, 300)))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let prompt = format!(
+            r#"You are evaluating whether retrieved documents can answer a user query about gold loans.
+
+User Query: "{query}"
+
+Retrieved Documents:
+{documents}
+
+Evaluate if these documents provide sufficient information to answer the query.
+
+Respond in JSON format:
+{{
+    "sufficient": true/false,
+    "coverage": 0.0-1.0,
+    "missing": "description of missing information, or null if sufficient",
+    "refined_query": "improved search query if coverage < 0.7, or null if sufficient"
+}}
+
+IMPORTANT:
+- "sufficient" should be true only if documents directly address the query
+- "coverage" represents how much of the query can be answered (0.0 = none, 1.0 = fully)
+- For gold loan queries, consider: rates, eligibility, process, documents required, benefits
+- Only suggest refined_query if documents are insufficient
+
+JSON response:"#,
+            query = query,
+            documents = doc_context,
+        );
+
+        let messages = vec![Message {
+            role: Role::User,
+            content: prompt,
+        }];
+
+        // Call LLM for evaluation
+        match llm.generate(&messages).await {
+            Ok(response) => {
+                // Parse JSON response
+                match self.parse_evaluation_response(&response.text) {
+                    Ok(mut eval) => {
+                        eval.method = "llm".to_string();
+                        eval.confidence = 0.85;
+
+                        // Blend with heuristic if configured
+                        if self.config.use_heuristic_fallback {
+                            eval.coverage = eval.coverage * 0.7 + heuristic_score * 0.3;
+                            eval.sufficient = eval.coverage >= self.config.min_coverage;
+                        }
+
+                        Ok(eval)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to parse LLM evaluation, using heuristic");
+                        Ok(SufficiencyEvaluation {
+                            sufficient: heuristic_score >= self.config.min_coverage,
+                            coverage: heuristic_score,
+                            missing: None,
+                            refined_query: None,
+                            confidence: 0.6,
+                            method: "heuristic_fallback".to_string(),
+                        })
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "LLM evaluation failed, using heuristic");
+                Ok(SufficiencyEvaluation {
+                    sufficient: heuristic_score >= self.config.min_coverage,
+                    coverage: heuristic_score,
+                    missing: None,
+                    refined_query: None,
+                    confidence: 0.6,
+                    method: "heuristic_fallback".to_string(),
+                })
+            }
+        }
+    }
+
+    /// Quick heuristic check (no LLM call)
+    pub fn quick_check(&self, query: &str, results: &[SearchResult]) -> f32 {
+        self.heuristic_checker.score(results, query)
+    }
+
+    /// Parse the JSON response from LLM
+    fn parse_evaluation_response(&self, response: &str) -> Result<SufficiencyEvaluation, RagError> {
+        // Try to extract JSON from response (may have extra text)
+        let json_str = if let Some(start) = response.find('{') {
+            if let Some(end) = response.rfind('}') {
+                &response[start..=end]
+            } else {
+                response
+            }
+        } else {
+            response
+        };
+
+        #[derive(serde::Deserialize)]
+        struct LlmResponse {
+            sufficient: bool,
+            coverage: f32,
+            missing: Option<String>,
+            refined_query: Option<String>,
+        }
+
+        let parsed: LlmResponse = serde_json::from_str(json_str)
+            .map_err(|e| RagError::Search(format!("Failed to parse LLM response: {}", e)))?;
+
+        Ok(SufficiencyEvaluation {
+            sufficient: parsed.sufficient && parsed.coverage >= self.config.min_coverage,
+            coverage: parsed.coverage.clamp(0.0, 1.0),
+            missing: parsed.missing,
+            refined_query: parsed.refined_query,
+            confidence: 0.85,
+            method: "llm".to_string(),
+        })
+    }
+
+    /// Truncate text at word boundary
+    fn truncate_text(text: &str, max_len: usize) -> String {
+        if text.len() <= max_len {
+            return text.to_string();
+        }
+
+        // Find last word boundary within limit
+        let truncated = &text[..max_len];
+        if let Some(last_space) = truncated.rfind(|c: char| c.is_whitespace()) {
+            format!("{}...", &text[..last_space])
+        } else {
+            format!("{}...", truncated)
+        }
+    }
+}
+
+impl Default for LlmSufficiencyChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Rewrites queries for better retrieval using LLM
 pub struct QueryRewriter {
     llm: Arc<dyn LlmBackend>,

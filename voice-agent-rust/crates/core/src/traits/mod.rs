@@ -35,6 +35,8 @@ mod text_processing;
 mod pipeline;
 
 pub use speech::{SpeechToText, TextToSpeech};
+// P1 FIX: Export VoiceActivityDetector trait and types
+pub use speech::{VoiceActivityDetector, VADConfig, VADEvent, VADState, AudioProcessor};
 pub use llm::LanguageModel;
 pub use retriever::{
     Retriever, RetrieveOptions, Document, ConversationContext,

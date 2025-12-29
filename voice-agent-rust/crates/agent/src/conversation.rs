@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use parking_lot::Mutex;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use voice_agent_core::{Turn, TurnRole};
 use crate::stage::{StageManager, ConversationStage, TransitionReason};
@@ -80,6 +81,211 @@ pub enum ConversationState {
     Ended,
 }
 
+// =============================================================================
+// P0 FIX: AI Disclosure and Consent Tracking (RBI Compliance)
+// =============================================================================
+
+/// P0 FIX: AI Disclosure tracking for RBI compliance
+///
+/// RBI requires that customers are informed they are speaking with an AI,
+/// and must be given the option to speak with a human agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiDisclosure {
+    /// Whether AI disclosure has been given to the customer
+    pub given: bool,
+    /// When the disclosure was given
+    pub timestamp: Option<DateTime<Utc>>,
+    /// Language in which disclosure was given
+    pub language: Option<String>,
+    /// The actual disclosure text that was used
+    pub disclosure_text: Option<String>,
+    /// Whether human escalation option was offered
+    pub human_option_offered: bool,
+}
+
+impl Default for AiDisclosure {
+    fn default() -> Self {
+        Self {
+            given: false,
+            timestamp: None,
+            language: None,
+            disclosure_text: None,
+            human_option_offered: false,
+        }
+    }
+}
+
+impl AiDisclosure {
+    /// Mark AI disclosure as given
+    pub fn mark_disclosed(&mut self, language: &str, text: &str, human_option: bool) {
+        self.given = true;
+        self.timestamp = Some(Utc::now());
+        self.language = Some(language.to_string());
+        self.disclosure_text = Some(text.to_string());
+        self.human_option_offered = human_option;
+    }
+
+    /// Get localized AI disclosure message
+    pub fn get_disclosure_message(language: &str) -> &'static str {
+        match language {
+            "hi" | "hindi" => "यह एक AI सहायक है। आप किसी भी समय 'एजेंट से बात करें' कहकर मानव एजेंट से बात कर सकते हैं।",
+            "mr" | "marathi" => "हे एक AI सहाय्यक आहे. तुम्ही कधीही 'एजंटशी बोला' असे सांगून मानवी एजंटशी बोलू शकता.",
+            "ta" | "tamil" => "இது ஒரு AI உதவியாளர். நீங்கள் எந்த நேரத்திலும் 'ஏஜெண்டுடன் பேசுங்கள்' என்று சொல்லி மனித ஏஜெண்டுடன் பேசலாம்.",
+            "te" | "telugu" => "ఇది AI సహాయకుడు. మీరు ఎప్పుడైనా 'ఏజెంట్‌తో మాట్లాడండి' అని చెప్పి మానవ ఏజెంట్‌తో మాట్లాడవచ్చు.",
+            "bn" | "bengali" => "এটি একটি AI সহায়ক। আপনি যেকোনো সময় 'এজেন্টের সাথে কথা বলুন' বলে একজন মানব এজেন্টের সাথে কথা বলতে পারেন।",
+            "gu" | "gujarati" => "આ એક AI સહાયક છે. તમે ગમે ત્યારે 'એજન્ટ સાથે વાત કરો' કહીને માનવ એજન્ટ સાથે વાત કરી શકો છો.",
+            "kn" | "kannada" => "ಇದು AI ಸಹಾಯಕ. ನೀವು ಯಾವುದೇ ಸಮಯದಲ್ಲಿ 'ಏಜೆಂಟ್‌ನೊಂದಿಗೆ ಮಾತನಾಡಿ' ಎಂದು ಹೇಳುವ ಮೂಲಕ ಮಾನವ ಏಜೆಂಟ್‌ನೊಂದಿಗೆ ಮಾತನಾಡಬಹುದು.",
+            "ml" | "malayalam" => "ഇത് ഒരു AI അസിസ്റ്റന്റ് ആണ്. 'ഏജന്റിനോട് സംസാരിക്കുക' എന്ന് പറഞ്ഞ് നിങ്ങൾക്ക് എപ്പോൾ വേണമെങ്കിലും ഒരു മനുഷ്യ ഏജന്റുമായി സംസാരിക്കാം.",
+            "pa" | "punjabi" => "ਇਹ ਇੱਕ AI ਸਹਾਇਕ ਹੈ। ਤੁਸੀਂ ਕਿਸੇ ਵੀ ਸਮੇਂ 'ਏਜੰਟ ਨਾਲ ਗੱਲ ਕਰੋ' ਕਹਿ ਕੇ ਮਨੁੱਖੀ ਏਜੰਟ ਨਾਲ ਗੱਲ ਕਰ ਸਕਦੇ ਹੋ।",
+            "or" | "odia" => "ଏହା ଏକ AI ସହାୟକ। ଆପଣ ଯେକୌଣସି ସମୟରେ 'ଏଜେଣ୍ଟଙ୍କ ସହ କଥା ହୁଅନ୍ତୁ' କହି ମାନବ ଏଜେଣ୍ଟଙ୍କ ସହ କଥା ହୋଇପାରିବେ।",
+            _ => "This is an AI assistant. You can speak with a human agent at any time by saying 'speak to agent'.",
+        }
+    }
+}
+
+/// P0 FIX: Consent tracking for RBI compliance
+///
+/// Tracks various consents required for voice banking:
+/// - Recording consent: Customer agrees to call recording
+/// - PII processing consent: Customer agrees to personal data processing
+/// - Marketing consent: Optional consent for promotional communications
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsentRecord {
+    /// Consent for call recording
+    pub recording_consent: bool,
+    /// When recording consent was given
+    pub recording_consent_timestamp: Option<DateTime<Utc>>,
+    /// Consent for PII processing
+    pub pii_processing_consent: bool,
+    /// When PII consent was given
+    pub pii_consent_timestamp: Option<DateTime<Utc>>,
+    /// Optional marketing consent
+    pub marketing_consent: Option<bool>,
+    /// When marketing consent was given/denied
+    pub marketing_consent_timestamp: Option<DateTime<Utc>>,
+    /// Method by which consent was obtained
+    pub consent_method: ConsentMethod,
+    /// Language of consent
+    pub consent_language: String,
+}
+
+/// Method by which consent was obtained
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConsentMethod {
+    /// Customer explicitly said "yes" or equivalent
+    Voice,
+    /// Customer typed confirmation
+    Text,
+    /// Implied by continuing after disclosure
+    Implied,
+    /// Customer explicitly clicked/tapped consent
+    Explicit,
+}
+
+impl Default for ConsentMethod {
+    fn default() -> Self {
+        Self::Implied
+    }
+}
+
+impl Default for ConsentRecord {
+    fn default() -> Self {
+        Self {
+            recording_consent: false,
+            recording_consent_timestamp: None,
+            pii_processing_consent: false,
+            pii_consent_timestamp: None,
+            marketing_consent: None,
+            marketing_consent_timestamp: None,
+            consent_method: ConsentMethod::Implied,
+            consent_language: "en".to_string(),
+        }
+    }
+}
+
+impl ConsentRecord {
+    /// Record recording consent
+    pub fn record_recording_consent(&mut self, given: bool, method: ConsentMethod) {
+        self.recording_consent = given;
+        self.recording_consent_timestamp = Some(Utc::now());
+        self.consent_method = method;
+    }
+
+    /// Record PII processing consent
+    pub fn record_pii_consent(&mut self, given: bool, method: ConsentMethod) {
+        self.pii_processing_consent = given;
+        self.pii_consent_timestamp = Some(Utc::now());
+        self.consent_method = method;
+    }
+
+    /// Record marketing consent
+    pub fn record_marketing_consent(&mut self, given: Option<bool>) {
+        self.marketing_consent = given;
+        self.marketing_consent_timestamp = Some(Utc::now());
+    }
+
+    /// Check if minimum required consents are given
+    pub fn has_minimum_consent(&self) -> bool {
+        // For voice banking, recording consent is essential
+        // PII consent is required before processing personal data
+        self.recording_consent
+    }
+
+    /// Check if all consents are given
+    pub fn has_full_consent(&self) -> bool {
+        self.recording_consent && self.pii_processing_consent
+    }
+}
+
+/// P0 FIX: Compliance status for the conversation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComplianceStatus {
+    /// AI disclosure tracking
+    pub ai_disclosure: AiDisclosure,
+    /// Consent tracking
+    pub consent: ConsentRecord,
+    /// Whether compliance requirements are met
+    pub compliant: bool,
+    /// List of pending compliance requirements
+    pub pending_requirements: Vec<String>,
+}
+
+impl Default for ComplianceStatus {
+    fn default() -> Self {
+        Self {
+            ai_disclosure: AiDisclosure::default(),
+            consent: ConsentRecord::default(),
+            compliant: false,
+            pending_requirements: vec![
+                "ai_disclosure".to_string(),
+                "recording_consent".to_string(),
+            ],
+        }
+    }
+}
+
+impl ComplianceStatus {
+    /// Update compliance status based on current state
+    pub fn update(&mut self) {
+        self.pending_requirements.clear();
+
+        if !self.ai_disclosure.given {
+            self.pending_requirements.push("ai_disclosure".to_string());
+        }
+
+        if !self.consent.recording_consent {
+            self.pending_requirements.push("recording_consent".to_string());
+        }
+
+        self.compliant = self.pending_requirements.is_empty();
+    }
+
+    /// Check if ready for PII processing
+    pub fn can_process_pii(&self) -> bool {
+        self.ai_disclosure.given && self.consent.pii_processing_consent
+    }
+}
+
 /// Conversation manager
 pub struct Conversation {
     /// Session ID
@@ -102,6 +308,8 @@ pub struct Conversation {
     event_tx: broadcast::Sender<ConversationEvent>,
     /// Turn counter
     turn_count: Mutex<usize>,
+    /// P0 FIX: Compliance status (AI disclosure, consent)
+    compliance: Mutex<ComplianceStatus>,
 }
 
 impl Conversation {
@@ -120,6 +328,7 @@ impl Conversation {
             intent_detector: Arc::new(IntentDetector::new()),
             event_tx,
             turn_count: Mutex::new(0),
+            compliance: Mutex::new(ComplianceStatus::default()),
         }
     }
 
@@ -498,6 +707,83 @@ impl Conversation {
     /// Get stage manager reference
     pub fn stage_manager(&self) -> &StageManager {
         &self.stage_manager
+    }
+
+    // =========================================================================
+    // P0 FIX: Compliance Methods (AI Disclosure, Consent)
+    // =========================================================================
+
+    /// Get compliance status
+    pub fn compliance(&self) -> ComplianceStatus {
+        self.compliance.lock().clone()
+    }
+
+    /// Check if AI disclosure has been given
+    pub fn ai_disclosure_given(&self) -> bool {
+        self.compliance.lock().ai_disclosure.given
+    }
+
+    /// Mark AI disclosure as given
+    ///
+    /// Should be called at the start of conversation after the greeting.
+    /// Returns the disclosure message that should be spoken to the customer.
+    pub fn mark_ai_disclosed(&self) -> String {
+        let language = &self.config.language;
+        let disclosure_text = AiDisclosure::get_disclosure_message(language);
+
+        let mut compliance = self.compliance.lock();
+        compliance.ai_disclosure.mark_disclosed(language, disclosure_text, true);
+        compliance.update();
+
+        disclosure_text.to_string()
+    }
+
+    /// Mark AI disclosure with custom text
+    pub fn mark_ai_disclosed_with_text(&self, language: &str, text: &str, human_option: bool) {
+        let mut compliance = self.compliance.lock();
+        compliance.ai_disclosure.mark_disclosed(language, text, human_option);
+        compliance.update();
+    }
+
+    /// Record recording consent
+    pub fn record_recording_consent(&self, given: bool, method: ConsentMethod) {
+        let mut compliance = self.compliance.lock();
+        compliance.consent.record_recording_consent(given, method);
+        compliance.consent.consent_language = self.config.language.clone();
+        compliance.update();
+    }
+
+    /// Record PII processing consent
+    pub fn record_pii_consent(&self, given: bool, method: ConsentMethod) {
+        let mut compliance = self.compliance.lock();
+        compliance.consent.record_pii_consent(given, method);
+        compliance.update();
+    }
+
+    /// Record marketing consent
+    pub fn record_marketing_consent(&self, given: Option<bool>) {
+        let mut compliance = self.compliance.lock();
+        compliance.consent.record_marketing_consent(given);
+    }
+
+    /// Check if conversation is compliant (AI disclosure given, minimum consent obtained)
+    pub fn is_compliant(&self) -> bool {
+        self.compliance.lock().compliant
+    }
+
+    /// Check if PII processing is allowed
+    pub fn can_process_pii(&self) -> bool {
+        self.compliance.lock().can_process_pii()
+    }
+
+    /// Get pending compliance requirements
+    pub fn pending_compliance(&self) -> Vec<String> {
+        self.compliance.lock().pending_requirements.clone()
+    }
+
+    /// Get AI disclosure message for the configured language
+    pub fn get_ai_disclosure_message(&self) -> String {
+        AiDisclosure::get_disclosure_message(&self.config.language).to_string()
     }
 }
 

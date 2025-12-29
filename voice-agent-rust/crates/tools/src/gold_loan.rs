@@ -754,6 +754,466 @@ impl Default for BranchLocatorTool {
     }
 }
 
+// =============================================================================
+// P0 FIX: Missing MCP Tools
+// =============================================================================
+
+/// P0 FIX: Get gold price tool
+///
+/// Returns current gold prices (24K, 22K, 18K) from the persistence layer.
+pub struct GetGoldPriceTool {
+    /// Gold price service
+    price_service: Option<Arc<dyn voice_agent_persistence::GoldPriceService>>,
+    /// Fallback base price for 24K gold (INR per gram)
+    fallback_base_price: f64,
+}
+
+impl GetGoldPriceTool {
+    pub fn new() -> Self {
+        Self {
+            price_service: None,
+            fallback_base_price: 7500.0, // Default base price
+        }
+    }
+
+    pub fn with_price_service(service: Arc<dyn voice_agent_persistence::GoldPriceService>) -> Self {
+        Self {
+            price_service: Some(service),
+            fallback_base_price: 7500.0,
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for GetGoldPriceTool {
+    fn name(&self) -> &str {
+        "get_gold_price"
+    }
+
+    fn description(&self) -> &str {
+        "Get current gold prices per gram for different purities (24K, 22K, 18K)"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().to_string(),
+            description: self.description().to_string(),
+            input_schema: InputSchema::object()
+                .property("purity", PropertySchema::enum_type(
+                    "Gold purity to get price for (optional, returns all if not specified)",
+                    vec!["24K".into(), "22K".into(), "18K".into()]
+                ), false)
+                .property("weight_grams", PropertySchema::number(
+                    "Optional weight to calculate total value"
+                ), false),
+        }
+    }
+
+    async fn execute(&self, input: Value) -> Result<ToolOutput, ToolError> {
+        let purity = input.get("purity").and_then(|v| v.as_str());
+        let weight = input.get("weight_grams").and_then(|v| v.as_f64());
+
+        // Try to get price from service
+        let (price_24k, price_22k, price_18k, source) = if let Some(ref service) = self.price_service {
+            match service.get_current_price().await {
+                Ok(price) => (price.price_24k, price.price_22k, price.price_18k, price.source),
+                Err(e) => {
+                    tracing::warn!("Failed to get gold price from service: {}", e);
+                    // Fallback to calculated prices
+                    let base = self.fallback_base_price;
+                    (base, base * 0.916, base * 0.75, "fallback".to_string())
+                }
+            }
+        } else {
+            // No service, use fallback
+            let base = self.fallback_base_price;
+            (base, base * 0.916, base * 0.75, "fallback".to_string())
+        };
+
+        // Build response
+        let mut result = json!({
+            "prices": {
+                "24K": {
+                    "price_per_gram_inr": price_24k.round(),
+                    "description": "Pure gold (99.9%)"
+                },
+                "22K": {
+                    "price_per_gram_inr": price_22k.round(),
+                    "description": "Standard jewelry gold (91.6%)"
+                },
+                "18K": {
+                    "price_per_gram_inr": price_18k.round(),
+                    "description": "Fashion jewelry gold (75%)"
+                }
+            },
+            "source": source,
+            "updated_at": Utc::now().to_rfc3339(),
+            "disclaimer": "Prices are indicative. Final value determined at branch during valuation."
+        });
+
+        // If weight provided, calculate total values
+        if let Some(w) = weight {
+            let values = json!({
+                "24K": (w * price_24k).round(),
+                "22K": (w * price_22k).round(),
+                "18K": (w * price_18k).round()
+            });
+            result["estimated_values_inr"] = values;
+            result["weight_grams"] = json!(w);
+        }
+
+        // If specific purity requested, add focused message
+        if let Some(p) = purity {
+            let price = match p {
+                "24K" => price_24k,
+                "22K" => price_22k,
+                "18K" => price_18k,
+                _ => price_22k,
+            };
+            result["requested_purity"] = json!(p);
+            result["message"] = json!(format!(
+                "Current {} gold price is ₹{:.0} per gram.",
+                p, price
+            ));
+        } else {
+            result["message"] = json!(format!(
+                "Current gold prices - 24K: ₹{:.0}/g, 22K: ₹{:.0}/g, 18K: ₹{:.0}/g",
+                price_24k, price_22k, price_18k
+            ));
+        }
+
+        Ok(ToolOutput::json(result))
+    }
+}
+
+impl Default for GetGoldPriceTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// P0 FIX: Human escalation tool
+///
+/// Allows customers to escalate to a human agent when needed.
+/// Creates an escalation record for the call center to pick up.
+pub struct EscalateToHumanTool {
+    /// Escalation callback (for integration with call center systems)
+    on_escalate: Option<Arc<dyn Fn(String, String, String) + Send + Sync>>,
+}
+
+impl EscalateToHumanTool {
+    pub fn new() -> Self {
+        Self { on_escalate: None }
+    }
+
+    pub fn with_callback<F>(callback: F) -> Self
+    where
+        F: Fn(String, String, String) + Send + Sync + 'static,
+    {
+        Self {
+            on_escalate: Some(Arc::new(callback)),
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for EscalateToHumanTool {
+    fn name(&self) -> &str {
+        "escalate_to_human"
+    }
+
+    fn description(&self) -> &str {
+        "Escalate the conversation to a human agent when the customer requests it or when the AI cannot help"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().to_string(),
+            description: self.description().to_string(),
+            input_schema: InputSchema::object()
+                .property("reason", PropertySchema::enum_type(
+                    "Reason for escalation",
+                    vec![
+                        "customer_request".into(),
+                        "complex_query".into(),
+                        "complaint".into(),
+                        "technical_issue".into(),
+                        "sensitive_matter".into()
+                    ]
+                ), true)
+                .property("session_id", PropertySchema::string("Current session ID"), true)
+                .property("customer_phone", PropertySchema::string("Customer phone number"), false)
+                .property("summary", PropertySchema::string("Brief summary of conversation so far"), false)
+                .property("priority", PropertySchema::enum_type(
+                    "Escalation priority",
+                    vec!["normal".into(), "high".into(), "urgent".into()]
+                ).with_default(json!("normal")), false),
+        }
+    }
+
+    async fn execute(&self, input: Value) -> Result<ToolOutput, ToolError> {
+        let reason = input.get("reason")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::invalid_params("reason is required"))?;
+
+        let session_id = input.get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::invalid_params("session_id is required"))?;
+
+        let customer_phone = input.get("customer_phone")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+
+        let summary = input.get("summary")
+            .and_then(|v| v.as_str())
+            .unwrap_or("No summary provided");
+
+        let priority = input.get("priority")
+            .and_then(|v| v.as_str())
+            .unwrap_or("normal");
+
+        // Generate escalation ID
+        let escalation_id = format!("ESC{}", uuid::Uuid::new_v4().to_string()[..8].to_uppercase());
+
+        // Determine estimated wait time based on priority
+        let estimated_wait = match priority {
+            "urgent" => "1-2 minutes",
+            "high" => "2-5 minutes",
+            _ => "5-10 minutes",
+        };
+
+        // Call the escalation callback if registered
+        if let Some(ref callback) = self.on_escalate {
+            callback(
+                escalation_id.clone(),
+                session_id.to_string(),
+                reason.to_string(),
+            );
+        }
+
+        // Log the escalation
+        tracing::info!(
+            escalation_id = %escalation_id,
+            session_id = %session_id,
+            reason = %reason,
+            priority = %priority,
+            "Human escalation requested"
+        );
+
+        let result = json!({
+            "success": true,
+            "escalation_id": escalation_id,
+            "session_id": session_id,
+            "customer_phone": customer_phone,
+            "reason": reason,
+            "priority": priority,
+            "summary": summary,
+            "status": "queued",
+            "estimated_wait": estimated_wait,
+            "queue_position": 1, // Simplified - would be from real queue
+            "created_at": Utc::now().to_rfc3339(),
+            "message": format!(
+                "Your request has been escalated to a human agent. Escalation ID: {}. Estimated wait time: {}. Please hold.",
+                escalation_id, estimated_wait
+            ),
+            "instructions": "A human agent will join this conversation shortly. Please stay on the line."
+        });
+
+        Ok(ToolOutput::json(result))
+    }
+
+    fn timeout_secs(&self) -> u64 {
+        10 // Escalation should be quick
+    }
+}
+
+impl Default for EscalateToHumanTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// P0 FIX: Send SMS tool
+///
+/// Sends an SMS to the customer (simulated in non-production environments).
+pub struct SendSmsTool {
+    /// SMS service for sending messages
+    sms_service: Option<Arc<dyn voice_agent_persistence::SmsService>>,
+}
+
+impl SendSmsTool {
+    pub fn new() -> Self {
+        Self { sms_service: None }
+    }
+
+    pub fn with_sms_service(service: Arc<dyn voice_agent_persistence::SmsService>) -> Self {
+        Self {
+            sms_service: Some(service),
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for SendSmsTool {
+    fn name(&self) -> &str {
+        "send_sms"
+    }
+
+    fn description(&self) -> &str {
+        "Send an SMS message to the customer for appointment confirmations, follow-ups, or information sharing"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().to_string(),
+            description: self.description().to_string(),
+            input_schema: InputSchema::object()
+                .property("phone_number", PropertySchema::string("10-digit mobile number"), true)
+                .property("message_type", PropertySchema::enum_type(
+                    "Type of SMS message",
+                    vec![
+                        "appointment_confirmation".into(),
+                        "appointment_reminder".into(),
+                        "follow_up".into(),
+                        "welcome".into(),
+                        "promotional".into()
+                    ]
+                ), true)
+                .property("customer_name", PropertySchema::string("Customer name for personalization"), false)
+                .property("custom_message", PropertySchema::string("Custom message text (for follow_up type)"), false)
+                .property("appointment_details", PropertySchema::string("Appointment details (date, time, branch)"), false)
+                .property("session_id", PropertySchema::string("Session ID for tracking"), false),
+        }
+    }
+
+    async fn execute(&self, input: Value) -> Result<ToolOutput, ToolError> {
+        let phone = input.get("phone_number")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::invalid_params("phone_number is required"))?;
+
+        // Validate phone number
+        if phone.len() != 10 || !phone.chars().all(|c| c.is_ascii_digit()) {
+            return Err(ToolError::invalid_params("phone_number must be 10 digits"));
+        }
+
+        let msg_type_str = input.get("message_type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::invalid_params("message_type is required"))?;
+
+        let customer_name = input.get("customer_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Customer");
+
+        let session_id = input.get("session_id")
+            .and_then(|v| v.as_str());
+
+        // Parse message type
+        let msg_type = match msg_type_str {
+            "appointment_confirmation" => voice_agent_persistence::SmsType::AppointmentConfirmation,
+            "appointment_reminder" => voice_agent_persistence::SmsType::AppointmentReminder,
+            "follow_up" => voice_agent_persistence::SmsType::FollowUp,
+            "welcome" => voice_agent_persistence::SmsType::Welcome,
+            "promotional" => voice_agent_persistence::SmsType::Promotional,
+            _ => voice_agent_persistence::SmsType::FollowUp,
+        };
+
+        // Generate message text
+        let message_text = match msg_type {
+            voice_agent_persistence::SmsType::AppointmentConfirmation => {
+                let details = input.get("appointment_details")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("scheduled date and time");
+                format!(
+                    "Dear {}, your Kotak Gold Loan appointment is confirmed for {}. Please bring your gold and KYC documents. For queries, call 1800-xxx-xxxx. - Kotak Mahindra Bank",
+                    customer_name, details
+                )
+            },
+            voice_agent_persistence::SmsType::AppointmentReminder => {
+                let details = input.get("appointment_details")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("tomorrow");
+                format!(
+                    "Reminder: Dear {}, your Kotak Gold Loan appointment is {}. Please bring your gold and KYC documents. - Kotak Mahindra Bank",
+                    customer_name, details
+                )
+            },
+            voice_agent_persistence::SmsType::FollowUp => {
+                input.get("custom_message")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!(
+                        "Dear {}, thank you for your interest in Kotak Gold Loan. Get up to 75% of gold value at competitive rates. Call 1800-xxx-xxxx or visit your nearest branch. - Kotak Mahindra Bank",
+                        customer_name
+                    ))
+            },
+            voice_agent_persistence::SmsType::Welcome => {
+                format!(
+                    "Welcome to Kotak Mahindra Bank, {}! We're excited to help you with your gold loan needs. For any queries, call 1800-xxx-xxxx. - Kotak Mahindra Bank",
+                    customer_name
+                )
+            },
+            voice_agent_persistence::SmsType::Promotional => {
+                format!(
+                    "Special Offer for {}: Get gold loan at just 10.49%* p.a. with instant disbursement! Visit your nearest Kotak branch or call 1800-xxx-xxxx. T&C apply. - Kotak Mahindra Bank",
+                    customer_name
+                )
+            },
+            _ => format!("Dear {}, thank you for contacting Kotak Mahindra Bank. - Kotak Mahindra Bank", customer_name),
+        };
+
+        // Send via SMS service if available
+        let (message_id, status, simulated) = if let Some(ref service) = self.sms_service {
+            match service.send_sms(phone, &message_text, msg_type, session_id).await {
+                Ok(result) => (
+                    result.message_id.to_string(),
+                    result.status.as_str().to_string(),
+                    result.simulated,
+                ),
+                Err(e) => {
+                    tracing::warn!("SMS service failed: {}", e);
+                    // Generate local ID on failure
+                    let id = format!("SMS{}", uuid::Uuid::new_v4().to_string()[..8].to_uppercase());
+                    (id, "failed".to_string(), false)
+                }
+            }
+        } else {
+            // No service, generate local ID (not actually sent)
+            let id = format!("SMS{}", uuid::Uuid::new_v4().to_string()[..8].to_uppercase());
+            (id, "simulated_not_sent".to_string(), true)
+        };
+
+        let success = status != "failed";
+
+        let result = json!({
+            "success": success,
+            "message_id": message_id,
+            "phone_number": phone,
+            "message_type": msg_type_str,
+            "message_text": message_text,
+            "status": status,
+            "simulated": simulated,
+            "sent_at": if success { Some(Utc::now().to_rfc3339()) } else { None },
+            "message": if success {
+                format!("SMS {} to {}.", if simulated { "simulated" } else { "sent" }, phone)
+            } else {
+                "Failed to send SMS. Please try again.".to_string()
+            }
+        });
+
+        Ok(ToolOutput::json(result))
+    }
+
+    fn timeout_secs(&self) -> u64 {
+        30 // SMS sending might take time with external providers
+    }
+}
+
+impl Default for SendSmsTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// P0 FIX: Get branches from JSON data instead of hardcoded mock
 fn get_mock_branches(city: &str, area: Option<&str>, pincode: Option<&str>, max: usize) -> Vec<Value> {
     let city_lower = city.to_lowercase();

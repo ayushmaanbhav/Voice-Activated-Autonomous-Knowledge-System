@@ -91,12 +91,175 @@ impl Settings {
         // P2 FIX: Improved model path validation - check all paths and extensions
         self.validate_model_paths()?;
 
+        // P1 FIX: Comprehensive validation of all config sections
+        self.validate_pipeline()?;
+        self.validate_rag()?;
+        self.validate_server()?;
+
+        Ok(())
+    }
+
+    /// P1 FIX: Validate pipeline configuration
+    fn validate_pipeline(&self) -> Result<(), ConfigError> {
         // Validate latency budget
         if self.pipeline.latency_budget_ms < 200 {
             return Err(ConfigError::InvalidValue {
                 field: "pipeline.latency_budget_ms".to_string(),
                 message: "Latency budget too low (minimum 200ms)".to_string(),
             });
+        }
+
+        if self.pipeline.latency_budget_ms > 10000 {
+            return Err(ConfigError::InvalidValue {
+                field: "pipeline.latency_budget_ms".to_string(),
+                message: "Latency budget too high (maximum 10000ms)".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// P1 FIX: Validate RAG configuration
+    fn validate_rag(&self) -> Result<(), ConfigError> {
+        let rag = &self.rag;
+
+        // Validate weight is in [0, 1]
+        if !(0.0..=1.0).contains(&rag.dense_weight) {
+            return Err(ConfigError::InvalidValue {
+                field: "rag.dense_weight".to_string(),
+                message: format!("Must be between 0.0 and 1.0, got {}", rag.dense_weight),
+            });
+        }
+
+        // Validate thresholds are in valid ranges
+        if !(0.0..=1.0).contains(&rag.min_score) {
+            return Err(ConfigError::InvalidValue {
+                field: "rag.min_score".to_string(),
+                message: format!("Must be between 0.0 and 1.0, got {}", rag.min_score),
+            });
+        }
+
+        if !(0.0..=1.0).contains(&rag.prefilter_threshold) {
+            return Err(ConfigError::InvalidValue {
+                field: "rag.prefilter_threshold".to_string(),
+                message: format!("Must be between 0.0 and 1.0, got {}", rag.prefilter_threshold),
+            });
+        }
+
+        if !(0.0..=1.0).contains(&rag.early_termination_threshold) {
+            return Err(ConfigError::InvalidValue {
+                field: "rag.early_termination_threshold".to_string(),
+                message: format!("Must be between 0.0 and 1.0, got {}", rag.early_termination_threshold),
+            });
+        }
+
+        if !(0.0..=1.0).contains(&rag.prefetch_confidence_threshold) {
+            return Err(ConfigError::InvalidValue {
+                field: "rag.prefetch_confidence_threshold".to_string(),
+                message: format!("Must be between 0.0 and 1.0, got {}", rag.prefetch_confidence_threshold),
+            });
+        }
+
+        // Validate RRF k parameter (must be positive)
+        if rag.rrf_k <= 0.0 {
+            return Err(ConfigError::InvalidValue {
+                field: "rag.rrf_k".to_string(),
+                message: format!("Must be positive, got {}", rag.rrf_k),
+            });
+        }
+
+        // Validate top-k values are reasonable
+        if rag.final_top_k == 0 {
+            return Err(ConfigError::InvalidValue {
+                field: "rag.final_top_k".to_string(),
+                message: "Must be at least 1".to_string(),
+            });
+        }
+
+        if rag.final_top_k > rag.dense_top_k && rag.final_top_k > rag.sparse_top_k {
+            tracing::warn!(
+                "rag.final_top_k ({}) is larger than both dense_top_k ({}) and sparse_top_k ({}), \
+                 results will be limited by retrieval",
+                rag.final_top_k, rag.dense_top_k, rag.sparse_top_k
+            );
+        }
+
+        // Validate early termination consistency
+        if rag.early_termination_min_results > rag.max_full_model_docs {
+            return Err(ConfigError::InvalidValue {
+                field: "rag.early_termination_min_results".to_string(),
+                message: format!(
+                    "Cannot be larger than max_full_model_docs ({})",
+                    rag.max_full_model_docs
+                ),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// P1 FIX: Validate server configuration
+    fn validate_server(&self) -> Result<(), ConfigError> {
+        let server = &self.server;
+
+        // Validate port
+        if server.port == 0 {
+            return Err(ConfigError::InvalidValue {
+                field: "server.port".to_string(),
+                message: "Port cannot be 0".to_string(),
+            });
+        }
+
+        // Validate max connections
+        if server.max_connections == 0 {
+            return Err(ConfigError::InvalidValue {
+                field: "server.max_connections".to_string(),
+                message: "Max connections must be at least 1".to_string(),
+            });
+        }
+
+        // Validate timeout
+        if server.timeout_seconds == 0 {
+            return Err(ConfigError::InvalidValue {
+                field: "server.timeout_seconds".to_string(),
+                message: "Timeout must be at least 1 second".to_string(),
+            });
+        }
+
+        // Rate limit validation
+        let rate_limit = &server.rate_limit;
+        if rate_limit.enabled {
+            if rate_limit.messages_per_second == 0 {
+                return Err(ConfigError::InvalidValue {
+                    field: "server.rate_limit.messages_per_second".to_string(),
+                    message: "Must be at least 1 when rate limiting is enabled".to_string(),
+                });
+            }
+
+            if rate_limit.burst_multiplier < 1.0 {
+                return Err(ConfigError::InvalidValue {
+                    field: "server.rate_limit.burst_multiplier".to_string(),
+                    message: format!("Must be at least 1.0, got {}", rate_limit.burst_multiplier),
+                });
+            }
+        }
+
+        // Auth validation in production
+        if self.environment.is_production() && server.auth.enabled {
+            if server.auth.api_key.is_none() {
+                return Err(ConfigError::InvalidValue {
+                    field: "server.auth.api_key".to_string(),
+                    message: "API key must be set when auth is enabled in production".to_string(),
+                });
+            }
+        }
+
+        // CORS validation in production
+        if self.environment.is_production() && server.cors_enabled && server.cors_origins.is_empty() {
+            tracing::warn!(
+                "CORS is enabled in production but no origins are configured. \
+                 This may block legitimate requests."
+            );
         }
 
         Ok(())
@@ -671,5 +834,129 @@ mod tests {
 
         settings.pipeline.latency_budget_ms = 500;
         assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn test_rag_validation_dense_weight() {
+        let mut settings = Settings::default();
+
+        // Valid weight
+        settings.rag.dense_weight = 0.5;
+        assert!(settings.validate_rag().is_ok());
+
+        // Invalid weight (too high)
+        settings.rag.dense_weight = 1.5;
+        assert!(settings.validate_rag().is_err());
+
+        // Invalid weight (negative)
+        settings.rag.dense_weight = -0.1;
+        assert!(settings.validate_rag().is_err());
+    }
+
+    #[test]
+    fn test_rag_validation_thresholds() {
+        let mut settings = Settings::default();
+
+        // Invalid min_score
+        settings.rag.min_score = 1.5;
+        assert!(settings.validate_rag().is_err());
+        settings.rag.min_score = 0.4;
+
+        // Invalid early_termination_threshold
+        settings.rag.early_termination_threshold = -0.1;
+        assert!(settings.validate_rag().is_err());
+        settings.rag.early_termination_threshold = 0.92;
+
+        // Invalid rrf_k (not positive)
+        settings.rag.rrf_k = 0.0;
+        assert!(settings.validate_rag().is_err());
+        settings.rag.rrf_k = -1.0;
+        assert!(settings.validate_rag().is_err());
+    }
+
+    #[test]
+    fn test_rag_validation_top_k() {
+        let mut settings = Settings::default();
+
+        // final_top_k cannot be 0
+        settings.rag.final_top_k = 0;
+        assert!(settings.validate_rag().is_err());
+
+        // early_termination_min_results cannot exceed max_full_model_docs
+        settings.rag.final_top_k = 5;
+        settings.rag.early_termination_min_results = 20;
+        settings.rag.max_full_model_docs = 10;
+        assert!(settings.validate_rag().is_err());
+    }
+
+    #[test]
+    fn test_server_validation() {
+        let mut settings = Settings::default();
+
+        // Port cannot be 0
+        settings.server.port = 0;
+        assert!(settings.validate_server().is_err());
+        settings.server.port = 8080;
+
+        // max_connections cannot be 0
+        settings.server.max_connections = 0;
+        assert!(settings.validate_server().is_err());
+        settings.server.max_connections = 1000;
+
+        // timeout cannot be 0
+        settings.server.timeout_seconds = 0;
+        assert!(settings.validate_server().is_err());
+        settings.server.timeout_seconds = 30;
+
+        assert!(settings.validate_server().is_ok());
+    }
+
+    #[test]
+    fn test_rate_limit_validation() {
+        let mut settings = Settings::default();
+        settings.server.rate_limit.enabled = true;
+
+        // messages_per_second cannot be 0 when enabled
+        settings.server.rate_limit.messages_per_second = 0;
+        assert!(settings.validate_server().is_err());
+        settings.server.rate_limit.messages_per_second = 100;
+
+        // burst_multiplier must be >= 1.0
+        settings.server.rate_limit.burst_multiplier = 0.5;
+        assert!(settings.validate_server().is_err());
+        settings.server.rate_limit.burst_multiplier = 2.0;
+
+        assert!(settings.validate_server().is_ok());
+    }
+
+    #[test]
+    fn test_production_auth_validation() {
+        let mut settings = Settings::default();
+        settings.environment = RuntimeEnvironment::Production;
+        settings.server.auth.enabled = true;
+        settings.server.auth.api_key = None;
+
+        // Production with auth enabled requires API key
+        assert!(settings.validate_server().is_err());
+
+        settings.server.auth.api_key = Some("secret-key".to_string());
+        assert!(settings.validate_server().is_ok());
+    }
+
+    #[test]
+    fn test_pipeline_latency_bounds() {
+        let mut settings = Settings::default();
+
+        // Too low
+        settings.pipeline.latency_budget_ms = 100;
+        assert!(settings.validate_pipeline().is_err());
+
+        // Too high
+        settings.pipeline.latency_budget_ms = 15000;
+        assert!(settings.validate_pipeline().is_err());
+
+        // Valid range
+        settings.pipeline.latency_budget_ms = 500;
+        assert!(settings.validate_pipeline().is_ok());
     }
 }

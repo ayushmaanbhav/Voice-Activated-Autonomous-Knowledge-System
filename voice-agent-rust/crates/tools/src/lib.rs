@@ -19,6 +19,10 @@ pub use gold_loan::{
     BranchData,
     get_branches,
     reload_branches,
+    // P0 FIX: New missing MCP tools
+    GetGoldPriceTool,
+    EscalateToHumanTool,
+    SendSmsTool,
 };
 pub use integrations::{
     CrmIntegration, StubCrmIntegration, CrmLead, LeadSource, LeadStatus, InterestLevel,

@@ -7,7 +7,8 @@ license.workspace = true
 description = "Text processing pipeline for voice agent (grammar, translation, PII, compliance)"
 
 [features]
-default = []
+# P0 FIX: Enable ONNX by default for translation to work
+default = ["onnx"]
 # P3: ONNX-based IndicTrans2 translation
 onnx = ["dep:ort", "dep:ndarray", "dep:tokenizers"]
 

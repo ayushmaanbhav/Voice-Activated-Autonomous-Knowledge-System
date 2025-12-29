@@ -9,6 +9,8 @@ description = "MCP tool interface and gold loan tools"
 [dependencies]
 voice-agent-core.workspace = true
 voice-agent-config.workspace = true
+# P0 FIX: Required for new MCP tools (gold price, SMS)
+voice-agent-persistence.workspace = true
 
 # Async
 tokio = { workspace = true, features = ["sync", "time"] }

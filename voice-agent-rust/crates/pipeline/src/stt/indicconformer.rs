@@ -80,6 +80,16 @@ struct IndicConformerState {
     start_time_ms: u64,
     /// Previous encoder hidden state for streaming (if using RNN-T)
     encoder_state: Option<Array2<f32>>,
+    /// P0 FIX: Running sum of frame confidences for averaging
+    confidence_sum: f32,
+    /// P0 FIX: Number of frames processed (for averaging)
+    confidence_count: usize,
+    /// P0 FIX: Per-word confidence accumulator
+    current_word_confidence: f32,
+    /// P0 FIX: Frame count for current word
+    current_word_frames: usize,
+    /// P0 FIX: Total audio frames processed (for timestamp calculation)
+    total_audio_frames: usize,
 }
 
 /// IndicConformer STT implementation
@@ -155,6 +165,11 @@ impl IndicConformerStt {
                 words: Vec::new(),
                 start_time_ms: 0,
                 encoder_state: None,
+                confidence_sum: 0.0,
+                confidence_count: 0,
+                current_word_confidence: 0.0,
+                current_word_frames: 0,
+                total_audio_frames: 0,
             }),
         })
     }
@@ -187,6 +202,11 @@ impl IndicConformerStt {
                 words: Vec::new(),
                 start_time_ms: 0,
                 encoder_state: None,
+                confidence_sum: 0.0,
+                confidence_count: 0,
+                current_word_confidence: 0.0,
+                current_word_frames: 0,
+                total_audio_frames: 0,
             }),
         })
     }
@@ -215,6 +235,57 @@ impl IndicConformerStt {
             .clone();
 
         Ok(Vocabulary::from_tokens(tokens))
+    }
+
+    /// P0 FIX: Extract confidence from model logits using softmax
+    ///
+    /// Computes the probability of the predicted token by applying softmax
+    /// to the logits and returning the max probability.
+    fn extract_confidence_from_logits(logits: &[f32]) -> f32 {
+        if logits.is_empty() {
+            return 0.5; // Default for empty logits
+        }
+
+        // Find max logit for numerical stability (log-sum-exp trick)
+        let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+
+        // Compute softmax denominator: sum(exp(logit - max))
+        let exp_sum: f32 = logits.iter().map(|&x| (x - max_logit).exp()).sum();
+
+        if exp_sum == 0.0 {
+            return 0.5; // Avoid division by zero
+        }
+
+        // Find the maximum probability (confidence of best prediction)
+        let max_prob = logits
+            .iter()
+            .map(|&x| (x - max_logit).exp() / exp_sum)
+            .fold(0.0f32, f32::max);
+
+        // Clamp to valid probability range
+        max_prob.clamp(0.0, 1.0)
+    }
+
+    /// P0 FIX: Calculate word timestamp based on frame timing
+    ///
+    /// Uses actual frame-level timing instead of naive character-based heuristic.
+    fn calculate_word_timestamp(
+        &self,
+        word: &str,
+        start_frame: usize,
+        end_frame: usize,
+    ) -> (u64, u64) {
+        // Each frame represents hop_length samples at sample_rate Hz
+        let frame_duration_ms = (self.config.hop_length as f64 / self.config.sample_rate.as_u32() as f64 * 1000.0) as u64;
+
+        let start_ms = start_frame as u64 * frame_duration_ms;
+        let end_ms = end_frame as u64 * frame_duration_ms;
+
+        // Ensure end is at least start + minimum word duration
+        let min_word_duration = (word.chars().count() as u64 * 30).max(100); // At least 30ms per char, min 100ms
+        let adjusted_end = end_ms.max(start_ms + min_word_duration);
+
+        (start_ms, adjusted_end)
     }
 
     /// Get chunk size in samples
@@ -307,8 +378,21 @@ impl IndicConformerStt {
                     (0..vocab_size).map(|v| logits_view[[frame_idx, v]]).collect()
                 };
 
+                // P0 FIX: Extract actual confidence from logits
+                let frame_confidence = Self::extract_confidence_from_logits(&frame_logits);
+
+                // Update running confidence stats
+                {
+                    let mut state = self.state.lock();
+                    state.confidence_sum += frame_confidence;
+                    state.confidence_count += 1;
+                    state.current_word_confidence += frame_confidence;
+                    state.current_word_frames += 1;
+                    state.total_audio_frames += 1;
+                }
+
                 if let Some(word) = self.decoder.process_frame(&frame_logits)? {
-                    self.add_word(&word);
+                    self.add_word_with_confidence(&word, frame_confidence);
                 }
             }
         }
@@ -326,22 +410,47 @@ impl IndicConformerStt {
         Ok(())
     }
 
-    /// Add a detected word with timestamp
-    fn add_word(&self, word: &str) {
+    /// P0 FIX: Add a detected word with actual confidence from model
+    fn add_word_with_confidence(&self, word: &str, last_frame_confidence: f32) {
         let mut state = self.state.lock();
 
-        let total_chars: usize = state.words.iter().map(|w| w.word.len()).sum();
-        let char_ms = 50; // Approximate ms per character
+        // P0 FIX: Calculate word confidence as average of frames for this word
+        let word_confidence = if state.current_word_frames > 0 {
+            (state.current_word_confidence / state.current_word_frames as f32).clamp(0.0, 1.0)
+        } else {
+            last_frame_confidence.clamp(0.0, 1.0)
+        };
 
-        let word_start = state.start_time_ms + (total_chars * char_ms) as u64;
-        let word_end = word_start + (word.len() * char_ms) as u64;
+        // P0 FIX: Calculate timestamps based on actual frame positions
+        let frame_duration_ms = (self.config.hop_length as f64 / self.config.sample_rate.as_u32() as f64 * 1000.0) as u64;
+
+        // Calculate word boundaries based on frames processed
+        let word_end_frame = state.total_audio_frames;
+        let word_start_frame = word_end_frame.saturating_sub(state.current_word_frames);
+
+        let word_start = state.start_time_ms + (word_start_frame as u64 * frame_duration_ms);
+        let word_end = state.start_time_ms + (word_end_frame as u64 * frame_duration_ms);
+
+        // Ensure minimum duration
+        let min_duration = (word.chars().count() as u64 * 30).max(100);
+        let adjusted_end = word_end.max(word_start + min_duration);
 
         state.words.push(WordTimestamp {
             word: word.trim().to_string(),
             start_ms: word_start,
-            end_ms: word_end,
-            confidence: 0.9,
+            end_ms: adjusted_end,
+            confidence: word_confidence,
         });
+
+        // Reset per-word accumulators
+        state.current_word_confidence = 0.0;
+        state.current_word_frames = 0;
+    }
+
+    /// Legacy add_word for backward compatibility (uses default confidence)
+    #[allow(dead_code)]
+    fn add_word(&self, word: &str) {
+        self.add_word_with_confidence(word, 0.5)
     }
 
     /// Get current partial result
@@ -356,10 +465,22 @@ impl IndicConformerStt {
         let start_ms = state.start_time_ms;
         let end_ms = words.last().map(|w| w.end_ms).unwrap_or(start_ms);
 
+        // P0 FIX: Calculate actual confidence as average of all frames
+        let confidence = if state.confidence_count > 0 {
+            (state.confidence_sum / state.confidence_count as f32).clamp(0.0, 1.0)
+        } else {
+            // Fallback: average word confidences if available
+            if !words.is_empty() {
+                words.iter().map(|w| w.confidence).sum::<f32>() / words.len() as f32
+            } else {
+                0.5 // Neutral confidence when no data
+            }
+        };
+
         Some(TranscriptResult {
             text,
             is_final: false,
-            confidence: 0.8,
+            confidence,
             start_time_ms: start_ms,
             end_time_ms: end_ms,
             language: Some(self.config.language.clone()),
@@ -388,10 +509,22 @@ impl IndicConformerStt {
         let start_ms = state.start_time_ms;
         let end_ms = words.last().map(|w| w.end_ms).unwrap_or(start_ms);
 
+        // P0 FIX: Calculate actual final confidence as average of all frames
+        let confidence = if state.confidence_count > 0 {
+            (state.confidence_sum / state.confidence_count as f32).clamp(0.0, 1.0)
+        } else {
+            // Fallback: average word confidences if available
+            if !words.is_empty() {
+                words.iter().map(|w| w.confidence).sum::<f32>() / words.len() as f32
+            } else {
+                0.5 // Neutral confidence when no data
+            }
+        };
+
         TranscriptResult {
             text,
             is_final: true,
-            confidence: 0.9,
+            confidence,
             start_time_ms: start_ms,
             end_time_ms: end_ms,
             language: Some(self.config.language.clone()),
@@ -407,6 +540,12 @@ impl IndicConformerStt {
         state.words.clear();
         state.start_time_ms = 0;
         state.encoder_state = None;
+        // P0 FIX: Reset confidence tracking state
+        state.confidence_sum = 0.0;
+        state.confidence_count = 0;
+        state.current_word_confidence = 0.0;
+        state.current_word_frames = 0;
+        state.total_audio_frames = 0;
         self.decoder.reset();
     }
 

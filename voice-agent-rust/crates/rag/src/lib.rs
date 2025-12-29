@@ -26,6 +26,8 @@ pub mod query_expansion;
 pub mod domain_boost;
 pub mod cross_lingual;
 pub mod adapter;
+// P1 FIX: Context sizing by conversation stage
+pub mod context;
 
 pub use embeddings::{Embedder, EmbeddingConfig, SimpleEmbedder};
 pub use candle_embeddings::{
@@ -40,6 +42,8 @@ pub use retriever::{HybridRetriever, RetrieverConfig, SearchResult};
 pub use agentic::{
     AgenticRetriever, AgenticRagConfig, AgenticSearchResult,
     ConversationContext, SufficiencyChecker, QueryRewriter,
+    // P1 FIX: LLM-based sufficiency checking
+    LlmSufficiencyChecker, LlmSufficiencyConfig, SufficiencyEvaluation,
 };
 pub use query_expansion::{
     QueryExpander, QueryExpansionConfig, ExpandedQuery,
@@ -53,6 +57,10 @@ pub use cross_lingual::{
     CrossLingualNormalizer, DetectedScript, LanguageDetection, NormalizedQuery,
 };
 pub use adapter::{EnhancedRetriever, EnhancedRetrieverConfig};
+pub use context::{
+    Stage, ContextBudget, ContextConfig, ContextManager,
+    context_budget_for_stage,
+};
 
 use thiserror::Error;
 

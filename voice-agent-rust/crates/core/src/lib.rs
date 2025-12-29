@@ -54,6 +54,8 @@ pub use llm_types::{
 pub use traits::{
     // Speech
     SpeechToText, TextToSpeech,
+    // P1 FIX: VoiceActivityDetector trait
+    VoiceActivityDetector, VADConfig, VADEvent, VADState, AudioProcessor,
     // LLM
     LanguageModel,
     // Retrieval

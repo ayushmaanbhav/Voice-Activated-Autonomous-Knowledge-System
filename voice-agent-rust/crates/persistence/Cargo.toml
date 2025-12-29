@@ -24,6 +24,8 @@ chrono = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 rand = "0.8"
+# P0 FIX: SHA-256 for audit log merkle chain
+sha2 = "0.10"
 
 # Internal
 voice-agent-core = { workspace = true }
