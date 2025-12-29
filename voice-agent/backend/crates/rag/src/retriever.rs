@@ -9,6 +9,7 @@ use crate::embeddings::{EmbeddingConfig, SimpleEmbedder};
 use crate::vector_store::{VectorStore, SearchFilter};
 use crate::sparse_search::SparseIndex;
 use crate::reranker::{RerankerConfig, SimpleScorer, EarlyExitReranker};
+use crate::query_expansion::QueryExpander;
 use crate::RagError;
 
 /// Retriever configuration
@@ -32,6 +33,8 @@ pub struct RetrieverConfig {
     pub prefetch_confidence_threshold: f32,
     /// P2 FIX: Number of results to prefetch
     pub prefetch_top_k: usize,
+    /// P1 FIX: Enable query expansion for Hindi/Hinglish synonyms
+    pub query_expansion_enabled: bool,
 }
 
 impl Default for RetrieverConfig {
@@ -46,6 +49,8 @@ impl Default for RetrieverConfig {
             reranking_enabled: true,
             prefetch_confidence_threshold: 0.7,
             prefetch_top_k: 3,
+            // P1 FIX: Enable query expansion by default for Hindi/Hinglish
+            query_expansion_enabled: true,
         }
     }
 }
@@ -63,6 +68,8 @@ impl From<&voice_agent_config::RagConfig> for RetrieverConfig {
             reranking_enabled: config.reranking_enabled,
             prefetch_confidence_threshold: config.prefetch_confidence_threshold,
             prefetch_top_k: config.prefetch_top_k,
+            // P1 FIX: Default to enabled (config crate can add field later)
+            query_expansion_enabled: true,
         }
     }
 }
@@ -101,17 +108,54 @@ pub struct HybridRetriever {
     reranker_config: RerankerConfig,
     /// P0 FIX: Now properly using EarlyExitReranker when available
     reranker: Option<Arc<EarlyExitReranker>>,
+    /// P1 FIX: Query expander for Hindi/Hinglish synonym expansion
+    query_expander: Option<QueryExpander>,
 }
 
 impl HybridRetriever {
     /// Create a new hybrid retriever
     pub fn new(config: RetrieverConfig, reranker_config: RerankerConfig) -> Self {
+        // P1 FIX: Create query expander if expansion is enabled
+        let query_expander = if config.query_expansion_enabled {
+            Some(QueryExpander::gold_loan())
+        } else {
+            None
+        };
+
         Self {
             config,
             embedder: Some(Arc::new(SimpleEmbedder::new(EmbeddingConfig::default()))),
             sparse_index: None,
             reranker_config,
             reranker: None, // Will use SimpleScorer fallback if not set
+            query_expander,
+        }
+    }
+
+    /// P1 FIX: Set a custom query expander
+    pub fn with_query_expander(mut self, expander: QueryExpander) -> Self {
+        self.query_expander = Some(expander);
+        self
+    }
+
+    /// P1 FIX: Disable query expansion
+    pub fn without_query_expansion(mut self) -> Self {
+        self.query_expander = None;
+        self
+    }
+
+    /// P1 FIX: Expand query using configured expander
+    fn expand_query(&self, query: &str) -> String {
+        if let Some(ref expander) = self.query_expander {
+            let expanded = expander.expand_to_string(query);
+            tracing::debug!(
+                original = query,
+                expanded = %expanded,
+                "Query expanded for better Hindi/Hinglish recall"
+            );
+            expanded
+        } else {
+            query.to_string()
         }
     }
 
@@ -189,19 +233,23 @@ impl HybridRetriever {
     /// Hybrid search with RRF fusion
     ///
     /// P1 FIX: Dense and sparse search now run in parallel using tokio::join!
+    /// P1 FIX: Query expansion now applied for Hindi/Hinglish synonym matching
     pub async fn search(
         &self,
         query: &str,
         vector_store: &VectorStore,
         filter: Option<SearchFilter>,
     ) -> Result<Vec<SearchResult>, RagError> {
-        // P1 FIX: Run dense and sparse search in parallel
-        let dense_future = self.search_dense(query, vector_store, filter.clone());
+        // P1 FIX: Expand query for better Hindi/Hinglish recall
+        let expanded_query = self.expand_query(query);
+
+        // P1 FIX: Run dense and sparse search in parallel with expanded query
+        let dense_future = self.search_dense(&expanded_query, vector_store, filter.clone());
 
         // P1 FIX: Sparse search now runs in spawn_blocking to avoid blocking async runtime
         // Tantivy search is CPU-intensive, so we move it off the async executor
         let sparse_index_clone = self.sparse_index.clone();
-        let query_owned = query.to_string();
+        let query_owned = expanded_query.clone();
         let sparse_top_k = self.config.sparse_top_k;
 
         let sparse_future = async move {

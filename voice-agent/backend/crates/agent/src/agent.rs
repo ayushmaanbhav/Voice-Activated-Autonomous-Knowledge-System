@@ -6,7 +6,9 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use parking_lot::RwLock;
 
-use voice_agent_llm::{PromptBuilder, Message, Role, OllamaBackend, LlmBackend, LlmConfig};
+use voice_agent_llm::{PromptBuilder, Message, Role, OllamaBackend, LlmConfig, LanguageModelAdapter};
+// P1 FIX: Use LanguageModel trait from core for proper abstraction
+use voice_agent_core::LanguageModel;
 // P0 FIX: Import PersonaConfig from the single source of truth
 use voice_agent_config::PersonaConfig;
 use voice_agent_tools::{ToolRegistry, ToolExecutor};
@@ -136,7 +138,8 @@ pub struct GoldLoanAgent {
     config: AgentConfig,
     conversation: Arc<Conversation>,
     tools: Arc<ToolRegistry>,
-    llm: Option<Arc<dyn LlmBackend>>,
+    /// P1 FIX: Now uses LanguageModel trait instead of LlmBackend for proper abstraction
+    llm: Option<Arc<dyn LanguageModel>>,
     /// P1 FIX: RAG retriever for context augmentation
     retriever: Option<Arc<HybridRetriever>>,
     /// P1 FIX: Vector store for RAG search (optional, can be injected)
@@ -170,9 +173,11 @@ impl GoldLoanAgent {
         let tools = Arc::new(voice_agent_tools::registry::create_default_registry());
 
         // Try to create LLM backend (defaults to Ollama on localhost)
-        // P1 FIX: Handle potential creation failure gracefully
-        let llm: Option<Arc<dyn LlmBackend>> = OllamaBackend::new(LlmConfig::default())
-            .map(|backend| Arc::new(backend) as Arc<dyn LlmBackend>)
+        // P1 FIX: Use LanguageModelAdapter to wrap LlmBackend for proper abstraction
+        // This allows the agent to use the core::LanguageModel trait which supports
+        // tool calling and streaming in a provider-agnostic way.
+        let llm: Option<Arc<dyn LanguageModel>> = OllamaBackend::new(LlmConfig::default())
+            .map(|backend| Arc::new(LanguageModelAdapter::new(backend)) as Arc<dyn LanguageModel>)
             .ok();
 
         // P1 FIX: Create RAG retriever if enabled
@@ -243,10 +248,11 @@ impl GoldLoanAgent {
     }
 
     /// Create agent with custom LLM backend
+    /// P1 FIX: Now accepts LanguageModel trait for proper abstraction
     pub fn with_llm(
         session_id: impl Into<String>,
         config: AgentConfig,
-        llm: Arc<dyn LlmBackend>,
+        llm: Arc<dyn LanguageModel>,
     ) -> Self {
         let (event_tx, _) = broadcast::channel(100);
 
@@ -999,21 +1005,26 @@ impl GoldLoanAgent {
             "Using stage-aware context budget"
         );
 
-        let messages = builder.build_with_limit(effective_budget);
+        // P1 FIX: Use build_request_with_limit for LanguageModel trait
+        let request = builder.build_request_with_limit(effective_budget);
 
         // Try to use LLM backend if available
         if let Some(ref llm) = self.llm {
             // Check if LLM is available
             if llm.is_available().await {
-                match llm.generate(&messages).await {
-                    Ok(result) => {
+                match llm.generate(request).await {
+                    Ok(response) => {
+                        // P1 FIX: Use GenerateResponse fields (LanguageModel trait)
+                        let tokens = response.usage
+                            .as_ref()
+                            .map(|u| u.completion_tokens)
+                            .unwrap_or(0);
                         tracing::debug!(
-                            "LLM generated {} tokens in {}ms (TTFT: {}ms)",
-                            result.tokens,
-                            result.total_time_ms,
-                            result.time_to_first_token_ms
+                            "LLM generated {} tokens, finish_reason={:?}",
+                            tokens,
+                            response.finish_reason
                         );
-                        return Ok(result.text);
+                        return Ok(response.text);
                     }
                     Err(e) => {
                         tracing::warn!("LLM generation failed, falling back to mock: {}", e);

@@ -10,8 +10,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use voice_agent_core::{Turn, TurnRole};
-use voice_agent_llm::{LlmBackend, Message, Role};
+use voice_agent_core::{Turn, TurnRole, LanguageModel, GenerateRequest};
 
 /// Memory configuration
 #[derive(Debug, Clone)]
@@ -143,7 +142,8 @@ pub struct ConversationMemory {
     /// Total turns processed
     total_turns: RwLock<usize>,
     /// P0 FIX: Optional LLM backend for real summarization
-    llm: RwLock<Option<Arc<dyn LlmBackend>>>,
+    /// P1 FIX: Now uses LanguageModel trait for proper abstraction
+    llm: RwLock<Option<Arc<dyn LanguageModel>>>,
     /// Entries pending summarization (collected when no LLM available)
     pending_summarization: RwLock<Vec<MemoryEntry>>,
 }
@@ -163,10 +163,11 @@ impl ConversationMemory {
     }
 
     /// P0 FIX: Set LLM backend for real summarization
+    /// P1 FIX: Now accepts LanguageModel trait for proper abstraction
     ///
     /// When an LLM is set, the memory system will use it to generate
     /// meaningful summaries instead of just concatenating text.
-    pub fn set_llm(&self, llm: Arc<dyn LlmBackend>) {
+    pub fn set_llm(&self, llm: Arc<dyn LanguageModel>) {
         *self.llm.write() = Some(llm);
     }
 
@@ -299,13 +300,12 @@ Summary:"#,
             conversation_text
         );
 
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-        }];
+        // P1 FIX: Use GenerateRequest for LanguageModel trait
+        let request = GenerateRequest::new("You are a helpful summarization assistant.")
+            .with_user_message(prompt);
 
         // Call LLM for summarization
-        match llm.generate(&messages).await {
+        match llm.generate(request).await {
             Ok(response) => {
                 let summary_text = response.text.trim().to_string();
 

@@ -445,9 +445,10 @@ async fn test_tool_savings_calculator() {
 
     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
 
-    // Should calculate savings - actual field names from tool
-    assert!(json["monthly_savings_inr"].as_f64().is_some());
-    assert!(json["total_savings_inr"].as_f64().is_some());
+    // P1 FIX: Updated to use new field names from P0 savings calculator changes
+    // The tool now provides both EMI-based and interest-only savings calculations
+    assert!(json["monthly_emi_savings_inr"].as_f64().is_some());
+    assert!(json["total_emi_savings_inr"].as_f64().is_some());
     // Kotak should have lower rate than 18%
     let kotak_rate = json["kotak_interest_rate_percent"].as_f64().unwrap_or(100.0);
     assert!(kotak_rate < 18.0);
@@ -710,8 +711,10 @@ async fn test_tool_registry_integration() {
     let config = IntegrationConfig::with_stubs();
     let registry = create_registry_with_integrations(config);
 
-    // Should have all 5 tools
-    assert_eq!(registry.len(), 5);
+    // P1 FIX: Updated to 8 tools after P0 additions (GetGoldPrice, EscalateToHuman, SendSms)
+    // Original 5: check_eligibility, calculate_savings, capture_lead, schedule_appointment, find_branches
+    // Added 3: get_gold_price, escalate_to_human, send_sms
+    assert_eq!(registry.len(), 8);
 
     // Test executing each tool type
     let eligibility_result = registry.execute("check_eligibility", json!({

@@ -501,12 +501,56 @@ Available tools:
         self.messages
     }
 
-    /// Build with context window limit
+    /// P1 FIX: Build as GenerateRequest for core::LanguageModel trait
     ///
-    /// P0 FIX: Truncates conversation history to fit within token limit.
-    /// Preserves system prompt and most recent messages, removing oldest
-    /// non-system messages first.
-    pub fn build_with_limit(self, max_tokens: usize) -> Vec<Message> {
+    /// Converts the prompt builder's messages to a GenerateRequest that
+    /// can be used with the LanguageModel trait from voice_agent_core.
+    pub fn build_request(self) -> voice_agent_core::GenerateRequest {
+        let core_messages: Vec<voice_agent_core::llm_types::Message> = self.messages
+            .into_iter()
+            .map(Self::convert_message_to_core)
+            .collect();
+
+        voice_agent_core::GenerateRequest {
+            messages: core_messages,
+            ..Default::default()
+        }
+    }
+
+    /// P1 FIX: Build as GenerateRequest with context window limit
+    ///
+    /// Combines token-limited message building with GenerateRequest conversion.
+    pub fn build_request_with_limit(self, max_tokens: usize) -> voice_agent_core::GenerateRequest {
+        let messages = self.build_with_limit_internal(max_tokens);
+        let core_messages: Vec<voice_agent_core::llm_types::Message> = messages
+            .into_iter()
+            .map(Self::convert_message_to_core)
+            .collect();
+
+        voice_agent_core::GenerateRequest {
+            messages: core_messages,
+            ..Default::default()
+        }
+    }
+
+    /// Convert llm crate Message to core crate Message
+    fn convert_message_to_core(m: Message) -> voice_agent_core::llm_types::Message {
+        let role = match m.role {
+            Role::System => voice_agent_core::llm_types::Role::System,
+            Role::User => voice_agent_core::llm_types::Role::User,
+            Role::Assistant => voice_agent_core::llm_types::Role::Assistant,
+            Role::Tool => voice_agent_core::llm_types::Role::Tool,
+        };
+        voice_agent_core::llm_types::Message {
+            role,
+            content: m.content,
+            name: None,
+            tool_call_id: None,
+        }
+    }
+
+    /// Internal helper for build_with_limit (also used by build_request_with_limit)
+    fn build_with_limit_internal(self, max_tokens: usize) -> Vec<Message> {
         let current_tokens = self.estimate_tokens();
 
         if current_tokens <= max_tokens {
@@ -552,6 +596,15 @@ Available tools:
         );
 
         result
+    }
+
+    /// Build with context window limit
+    ///
+    /// P0 FIX: Truncates conversation history to fit within token limit.
+    /// Preserves system prompt and most recent messages, removing oldest
+    /// non-system messages first.
+    pub fn build_with_limit(self, max_tokens: usize) -> Vec<Message> {
+        self.build_with_limit_internal(max_tokens)
     }
 
     /// Estimate tokens for a single message content

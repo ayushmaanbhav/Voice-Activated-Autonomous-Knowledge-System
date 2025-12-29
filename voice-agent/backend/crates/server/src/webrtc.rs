@@ -24,25 +24,32 @@ use axum::{
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, RwLock, Mutex};
 
 use voice_agent_transport::{
     WebRtcTransport, WebRtcConfig, IceServer, IceCandidate,
-    TransportEvent, Transport,
+    TransportEvent, Transport, AudioSource,
 };
+use voice_agent_pipeline::{VoicePipeline, PipelineConfig, PipelineEvent};
+use voice_agent_core::{AudioFrame, SampleRate, Channels};
 
 use crate::state::AppState;
+use crate::session::Session;
 
 /// WebRTC session state stored alongside the voice session
 pub struct WebRtcSession {
     /// The WebRTC transport (using tokio RwLock for async safety)
     pub transport: Arc<RwLock<WebRtcTransport>>,
-    /// Event receiver for transport events (unused for now, future use)
-    #[allow(dead_code)]
+    /// Event receiver for transport events
     pub event_rx: mpsc::Receiver<TransportEvent>,
-    /// ICE candidate receiver (for trickle ICE) (unused for now, future use)
-    #[allow(dead_code)]
+    /// ICE candidate receiver (for trickle ICE)
     pub ice_rx: mpsc::Receiver<IceCandidate>,
+    /// P1 FIX: Voice pipeline for audio processing
+    pub pipeline: Option<Arc<Mutex<VoicePipeline>>>,
+    /// P1 FIX: Audio processing task handle
+    pub audio_task: Option<tokio::task::JoinHandle<()>>,
+    /// P1 FIX: Pipeline event task handle
+    pub pipeline_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// SDP offer from/to client
@@ -68,7 +75,7 @@ pub struct SdpAnswer {
 }
 
 /// ICE candidate from/to client
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IceCandidateRequest {
     /// Candidate string
     pub candidate: String,
@@ -166,11 +173,44 @@ pub async fn handle_offer(
             Json(serde_json::json!({ "error": format!("Failed to process offer: {}", e) }))
         ))?;
 
+    // P1 FIX: Create voice pipeline for WebRTC audio processing
+    let pipeline = match VoicePipeline::simple(PipelineConfig::default()) {
+        Ok(p) => {
+            tracing::info!("Created voice pipeline for WebRTC session {}", session_id);
+            Some(Arc::new(Mutex::new(p)))
+        }
+        Err(e) => {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %e,
+                "Failed to create voice pipeline for WebRTC, audio processing disabled"
+            );
+            None
+        }
+    };
+
+    let transport = Arc::new(RwLock::new(transport));
+
+    // P1 FIX: Spawn audio processing task if pipeline is available
+    let (audio_task, pipeline_task) = if let Some(ref pipeline) = pipeline {
+        let (audio_handle, pipeline_handle) = spawn_webrtc_audio_processor(
+            transport.clone(),
+            pipeline.clone(),
+            session.clone(),
+        ).await;
+        (Some(audio_handle), Some(pipeline_handle))
+    } else {
+        (None, None)
+    };
+
     // Store WebRTC session
     let webrtc_session = WebRtcSession {
-        transport: Arc::new(RwLock::new(transport)),
+        transport,
         event_rx,
         ice_rx,
+        pipeline,
+        audio_task,
+        pipeline_task,
     };
 
     // Store in session
@@ -178,7 +218,7 @@ pub async fn handle_offer(
 
     tracing::info!(
         session_id = %session_id,
-        "WebRTC offer processed, answer generated"
+        "WebRTC offer processed, answer generated, audio pipeline wired"
     );
 
     Ok(Json(SdpAnswer {
@@ -342,6 +382,203 @@ pub async fn ice_restart(
         sdp_type: "offer".to_string(),
         sdp: new_offer,
     }))
+}
+
+/// P1 FIX: Spawn WebRTC audio processing tasks
+///
+/// Creates two tasks:
+/// 1. Audio receiver task: Receives audio from WebRTC transport, resamples 48kHz→16kHz,
+///    and feeds to the voice pipeline
+/// 2. Pipeline event task: Handles pipeline events (transcripts) and sends to agent
+async fn spawn_webrtc_audio_processor(
+    transport: Arc<RwLock<WebRtcTransport>>,
+    pipeline: Arc<Mutex<VoicePipeline>>,
+    session: Arc<Session>,
+) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
+    let session_id = session.id.clone();
+
+    // Get audio source from transport
+    let audio_source = {
+        let guard = transport.read().await;
+        guard.audio_source()
+    };
+
+    // P1 FIX: Audio receiver task - receives WebRTC audio and feeds to pipeline
+    let pipeline_for_audio = pipeline.clone();
+    let session_for_audio = session.clone();
+    let session_id_for_audio = session_id.clone();
+
+    let audio_task = tokio::spawn(async move {
+        // Unwrap audio source - if None, task exits immediately
+        let audio_source = match audio_source {
+            Some(source) => source,
+            None => {
+                tracing::warn!(
+                    session_id = %session_id_for_audio,
+                    "No audio source available for WebRTC, audio task exiting"
+                );
+                return;
+            }
+        };
+
+        let mut frame_count: u64 = 0;
+
+        // P1 FIX: Simple resampling buffer (48kHz → 16kHz = 3:1 ratio)
+        // Every 3 samples at 48kHz becomes 1 sample at 16kHz
+        const RESAMPLE_RATIO: usize = 3;
+
+        loop {
+            // Try to receive audio from WebRTC
+            match audio_source.recv_audio().await {
+                Ok(Some((samples_48k, _timestamp_ms))) => {
+                    session_for_audio.touch();
+
+                    // P1 FIX: Resample from 48kHz to 16kHz by averaging every 3 samples
+                    let samples_16k: Vec<f32> = samples_48k
+                        .chunks(RESAMPLE_RATIO)
+                        .map(|chunk| {
+                            chunk.iter().sum::<f32>() / chunk.len() as f32
+                        })
+                        .collect();
+
+                    if samples_16k.is_empty() {
+                        continue;
+                    }
+
+                    // Create audio frame at 16kHz for pipeline
+                    let frame = AudioFrame::new(
+                        samples_16k,
+                        SampleRate::Hz16000,
+                        Channels::Mono,
+                        frame_count,
+                    );
+                    frame_count += 1;
+
+                    // Feed to pipeline
+                    let pipeline_guard = pipeline_for_audio.lock().await;
+                    if let Err(e) = pipeline_guard.process_audio(frame).await {
+                        tracing::debug!(
+                            session_id = %session_id_for_audio,
+                            error = %e,
+                            "WebRTC pipeline processing error"
+                        );
+                    }
+                }
+                Ok(None) => {
+                    // No audio available, yield and try again
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        session_id = %session_id_for_audio,
+                        error = %e,
+                        "WebRTC audio receive error, stopping audio task"
+                    );
+                    break;
+                }
+            }
+        }
+
+        tracing::info!(
+            session_id = %session_id_for_audio,
+            "WebRTC audio receiver task ended"
+        );
+    });
+
+    // P1 FIX: Pipeline event task - handles transcripts and sends to agent
+    let session_for_pipeline = session.clone();
+    let session_id_for_pipeline = session_id.clone();
+
+    let pipeline_task = tokio::spawn(async move {
+        let mut pipeline_events = pipeline.lock().await.subscribe();
+
+        while let Ok(event) = pipeline_events.recv().await {
+            match event {
+                PipelineEvent::PartialTranscript(transcript) => {
+                    tracing::debug!(
+                        session_id = %session_id_for_pipeline,
+                        text = %transcript.text,
+                        "WebRTC partial transcript"
+                    );
+                    // Could send to WebRTC data channel if available
+                }
+                PipelineEvent::FinalTranscript(transcript) => {
+                    let text = transcript.text.clone();
+                    tracing::info!(
+                        session_id = %session_id_for_pipeline,
+                        text = %text,
+                        "WebRTC final transcript, processing with agent"
+                    );
+
+                    // Process through agent
+                    if !text.trim().is_empty() {
+                        match session_for_pipeline.agent.process(&text).await {
+                            Ok(response) => {
+                                tracing::info!(
+                                    session_id = %session_id_for_pipeline,
+                                    response_len = response.len(),
+                                    "Agent response generated for WebRTC"
+                                );
+                                // TODO: Send TTS audio back via WebRTC audio sink
+                                // For now, just log the response
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    session_id = %session_id_for_pipeline,
+                                    error = %e,
+                                    "Agent processing failed for WebRTC"
+                                );
+                            }
+                        }
+                    }
+                }
+                PipelineEvent::VadStateChanged(vad_state) => {
+                    tracing::debug!(
+                        session_id = %session_id_for_pipeline,
+                        is_speaking = ?vad_state,
+                        "WebRTC VAD state changed"
+                    );
+                }
+                PipelineEvent::TurnStateChanged(turn_state) => {
+                    tracing::debug!(
+                        session_id = %session_id_for_pipeline,
+                        turn_type = ?turn_state,
+                        "WebRTC turn state changed"
+                    );
+                }
+                PipelineEvent::TtsAudio { samples, text: _, is_final } => {
+                    tracing::debug!(
+                        session_id = %session_id_for_pipeline,
+                        samples_len = samples.len(),
+                        is_final = is_final,
+                        "WebRTC TTS audio (would send via audio sink)"
+                    );
+                    // TODO: Encode to Opus and send via WebRTC audio sink
+                }
+                PipelineEvent::BargeIn { at_word } => {
+                    tracing::debug!(
+                        session_id = %session_id_for_pipeline,
+                        at_word = at_word,
+                        "WebRTC barge-in detected"
+                    );
+                }
+                PipelineEvent::Error(e) => {
+                    tracing::error!(
+                        session_id = %session_id_for_pipeline,
+                        error = %e,
+                        "WebRTC pipeline error"
+                    );
+                }
+            }
+        }
+
+        tracing::info!(
+            session_id = %session_id_for_pipeline,
+            "WebRTC pipeline event task ended"
+        );
+    });
+
+    (audio_task, pipeline_task)
 }
 
 /// Build WebRTC config from application settings

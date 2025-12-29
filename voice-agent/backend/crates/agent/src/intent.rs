@@ -727,6 +727,14 @@ impl IntentDetector {
         )
     }
 
+    /// P1 FIX: Convert Devanagari numerals to ASCII (alias for indic_numerals_to_ascii)
+    ///
+    /// This is a convenience function for tests and backward compatibility.
+    /// Use `indic_numerals_to_ascii` for the full multi-script implementation.
+    pub fn devanagari_to_ascii(s: &str) -> String {
+        Self::indic_numerals_to_ascii(s)
+    }
+
     /// P0 FIX: Convert Hindi number word to numeric value
     fn hindi_word_to_number(word: &str) -> Option<f64> {
         match word {
