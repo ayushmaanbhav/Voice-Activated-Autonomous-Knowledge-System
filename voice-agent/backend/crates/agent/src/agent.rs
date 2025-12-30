@@ -688,6 +688,16 @@ impl GoldLoanAgent {
             }
         });
 
+        // P2 FIX: Check memory usage and cleanup if needed
+        // This prevents unbounded memory growth during long conversations
+        {
+            let memory = self.conversation.memory_arc();
+            if memory.needs_cleanup() {
+                tracing::info!("Memory high watermark exceeded, triggering cleanup");
+                memory.cleanup_to_watermark();
+            }
+        }
+
         // Emit response event
         let _ = self.event_tx.send(AgentEvent::Response(response.clone()));
 
@@ -730,6 +740,19 @@ impl GoldLoanAgent {
                     // If no specific date/branch, first find branches
                     Some("find_branches")
                 }
+            }
+            // P1 FIX: Add missing tool intent mappings
+            "gold_price" | "check_gold_price" | "price_inquiry" | "current_rate" => {
+                // Gold price inquiry - no required slots
+                Some("get_gold_price")
+            }
+            "escalate" | "human_agent" | "speak_to_person" | "talk_to_human" | "real_person" => {
+                // Escalation to human agent - no required slots
+                Some("escalate_to_human")
+            }
+            "send_sms" | "send_message" | "text_me" | "send_details" | "sms_info" => {
+                // Send SMS - phone_number slot is optional (can use customer's registered number)
+                Some("send_sms")
             }
             _ => None,
         };

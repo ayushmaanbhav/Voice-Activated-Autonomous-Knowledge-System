@@ -39,17 +39,18 @@ fn default_max_tokens() -> u32 {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum GrammarProvider {
-    /// Use LLM for correction
+    /// Use LLM for correction (P1 FIX: Now default when LLM available)
+    #[default]
     Llm,
     /// Disabled (pass-through)
-    #[default]
     Disabled,
 }
 
 impl Default for GrammarConfig {
     fn default() -> Self {
         Self {
-            provider: GrammarProvider::Disabled,
+            // P1 FIX: Default to LLM-based grammar correction
+            provider: GrammarProvider::Llm,
             domain: "gold_loan".to_string(),
             temperature: 0.1,
             max_tokens: 256,
@@ -82,7 +83,8 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = GrammarConfig::default();
-        assert!(matches!(config.provider, GrammarProvider::Disabled));
+        // P1 FIX: Grammar is now enabled by default
+        assert!(matches!(config.provider, GrammarProvider::Llm));
         assert_eq!(config.domain, "gold_loan");
     }
 }

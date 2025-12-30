@@ -28,6 +28,8 @@ pub mod cross_lingual;
 pub mod adapter;
 // P1 FIX: Context sizing by conversation stage
 pub mod context;
+// P2 FIX: Knowledge base loading
+pub mod knowledge_loader;
 
 pub use embeddings::{Embedder, EmbeddingConfig, SimpleEmbedder};
 pub use candle_embeddings::{
@@ -61,6 +63,7 @@ pub use context::{
     Stage, ContextBudget, ContextConfig, ContextManager,
     context_budget_for_stage,
 };
+pub use knowledge_loader::{KnowledgeLoader, KnowledgeDocument, KnowledgeFile};
 
 use thiserror::Error;
 

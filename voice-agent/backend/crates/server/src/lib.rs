@@ -15,7 +15,7 @@ pub use websocket::WebSocketHandler;
 pub use webrtc::WebRtcSession;
 pub use http::create_router;
 pub use auth::auth_middleware;
-pub use session::{Session, SessionManager, SessionStore, SessionMetadata, InMemorySessionStore, ScyllaSessionStore};
+pub use session::{Session, SessionManager, SessionStore, SessionMetadata, InMemorySessionStore, ScyllaSessionStore, RecoverableSession};
 pub use state::AppState;
 pub use rate_limit::{RateLimiter, RateLimitError};
 pub use metrics::{init_metrics, record_request, record_stt_latency, record_llm_latency, record_tts_latency, record_total_latency, record_error};
@@ -45,6 +45,10 @@ pub enum ServerError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    /// P2 FIX: Persistence error for audit logging
+    #[error("Persistence error: {0}")]
+    Persistence(String),
 }
 
 impl From<ServerError> for axum::http::StatusCode {
@@ -57,6 +61,7 @@ impl From<ServerError> for axum::http::StatusCode {
             ServerError::RateLimit => axum::http::StatusCode::TOO_MANY_REQUESTS,
             ServerError::InvalidRequest(_) => axum::http::StatusCode::BAD_REQUEST,
             ServerError::Internal(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            ServerError::Persistence(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

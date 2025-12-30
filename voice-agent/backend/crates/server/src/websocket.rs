@@ -75,9 +75,12 @@ impl WebSocketHandler {
     async fn handle_socket(
         socket: WebSocket,
         session: Arc<Session>,
-        _state: AppState,
+        state: AppState,
         rate_limiter: RateLimiter,
     ) {
+        // P2 FIX: Get text processing components from state
+        let text_processing = state.text_processing.clone();
+        let text_simplifier = state.text_simplifier.clone();
         let (sender, mut receiver) = socket.split();
 
         // Wrap sender in Arc<Mutex> for sharing across tasks
@@ -164,6 +167,9 @@ impl WebSocketHandler {
         let session_for_pipeline = session.clone();
         let sender_for_pipeline = sender.clone();
         let pipeline_for_tts = pipeline.clone(); // P0 FIX: Clone for TTS synthesis
+        // P2 FIX: Clone text processing for pipeline event handler
+        let text_processing_for_pipeline = text_processing.clone();
+        let text_simplifier_for_pipeline = text_simplifier.clone();
 
         #[allow(unused_mut)]
         let pipeline_event_task = if let Some(ref pipeline) = pipeline {
@@ -196,20 +202,38 @@ impl WebSocketHandler {
 
                             // Process through agent
                             if !text.trim().is_empty() {
-                                match session_for_pipeline.agent.process(&text).await {
+                                // P2 FIX: Process user input through text processing pipeline
+                                // (grammar correction, PII detection)
+                                let processed_input = match text_processing_for_pipeline.process(&text).await {
+                                    Ok(result) => {
+                                        if result.pii_detected {
+                                            tracing::info!("PII detected in user input, redacted");
+                                        }
+                                        result.processed
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Text processing failed: {}, using raw input", e);
+                                        text.clone()
+                                    }
+                                };
+
+                                match session_for_pipeline.agent.process(&processed_input).await {
                                     Ok(response) => {
-                                        // Send text response first
+                                        // P2 FIX: Simplify response for TTS (numbers, abbreviations)
+                                        let simplified_response = text_simplifier_for_pipeline.simplify(&response);
+
+                                        // Send text response first (original, not simplified)
                                         let resp = WsMessage::Response { text: response.clone() };
                                         let json = serde_json::to_string(&resp).unwrap();
                                         let mut s = sender_for_pipeline.lock().await;
                                         let _ = s.send(Message::Text(json)).await;
                                         drop(s); // Release lock before TTS
 
-                                        // P0 FIX: Trigger TTS synthesis
+                                        // P0 FIX: Trigger TTS synthesis with simplified text
                                         // TTS audio events will be handled by the TtsAudio handler above
                                         if let Some(ref pipeline) = pipeline_for_tts {
                                             let p = pipeline.lock().await;
-                                            if let Err(e) = p.speak(&response).await {
+                                            if let Err(e) = p.speak(&simplified_response).await {
                                                 tracing::debug!("TTS speak failed: {}", e);
                                             }
                                         }
@@ -323,8 +347,22 @@ impl WebSocketHandler {
                     if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
                         match ws_msg {
                             WsMessage::Text { content } => {
+                                // P2 FIX: Process user input through text processing pipeline
+                                let processed_input = match text_processing.process(&content).await {
+                                    Ok(result) => {
+                                        if result.pii_detected {
+                                            tracing::info!("PII detected in direct text input, redacted");
+                                        }
+                                        result.processed
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Text processing failed: {}, using raw input", e);
+                                        content.clone()
+                                    }
+                                };
+
                                 // Process text input
-                                match session.agent.process(&content).await {
+                                match session.agent.process(&processed_input).await {
                                     Ok(response) => {
                                         let resp = WsMessage::Response { text: response };
                                         let json = serde_json::to_string(&resp).unwrap();

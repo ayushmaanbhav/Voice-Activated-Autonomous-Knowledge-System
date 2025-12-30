@@ -48,6 +48,17 @@ pub struct SessionMetadata {
     pub instance_id: Option<String>,
 }
 
+/// P2 FIX: Session data for recovery (matches persistence layer)
+#[derive(Debug, Clone)]
+pub struct RecoverableSession {
+    pub session_id: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub conversation_stage: String,
+    pub turn_count: i32,
+    pub language: String,
+}
+
 /// P1 FIX: Session store trait for pluggable backends
 #[async_trait]
 pub trait SessionStore: Send + Sync {
@@ -68,6 +79,9 @@ pub trait SessionStore: Send + Sync {
 
     /// Check if this store supports distributed sessions
     fn is_distributed(&self) -> bool;
+
+    /// P2 FIX: List active sessions for recovery on restart
+    async fn list_active_sessions(&self, limit: i32) -> Result<Vec<RecoverableSession>, ServerError>;
 }
 
 /// P1 FIX: In-memory session store (default)
@@ -123,6 +137,11 @@ impl SessionStore for InMemorySessionStore {
 
     fn is_distributed(&self) -> bool {
         false
+    }
+
+    async fn list_active_sessions(&self, _limit: i32) -> Result<Vec<RecoverableSession>, ServerError> {
+        // In-memory sessions don't survive restarts, so nothing to recover
+        Ok(Vec::new())
     }
 }
 
@@ -202,6 +221,12 @@ impl SessionStore for RedisSessionStore {
 
     fn is_distributed(&self) -> bool {
         true
+    }
+
+    async fn list_active_sessions(&self, _limit: i32) -> Result<Vec<RecoverableSession>, ServerError> {
+        // RedisSessionStore is deprecated - no implementation
+        tracing::debug!("Redis list_active_sessions stub called");
+        Ok(Vec::new())
     }
 }
 
@@ -331,6 +356,22 @@ impl SessionStore for ScyllaSessionStore {
 
     fn is_distributed(&self) -> bool {
         true
+    }
+
+    async fn list_active_sessions(&self, limit: i32) -> Result<Vec<RecoverableSession>, ServerError> {
+        use voice_agent_persistence::sessions::SessionStore as PersistenceSessionStore;
+
+        let sessions = self.store.list_active(limit).await
+            .map_err(|e| ServerError::Session(format!("ScyllaDB list error: {}", e)))?;
+
+        Ok(sessions.into_iter().map(|s| RecoverableSession {
+            session_id: s.session_id,
+            created_at: s.created_at,
+            expires_at: s.expires_at,
+            conversation_stage: s.conversation_stage,
+            turn_count: s.turn_count,
+            language: s.language,
+        }).collect())
     }
 }
 

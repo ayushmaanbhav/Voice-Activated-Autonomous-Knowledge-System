@@ -389,7 +389,7 @@ pub async fn ice_restart(
 /// Creates two tasks:
 /// 1. Audio receiver task: Receives audio from WebRTC transport, resamples 48kHz→16kHz,
 ///    and feeds to the voice pipeline
-/// 2. Pipeline event task: Handles pipeline events (transcripts) and sends to agent
+/// 2. Pipeline event task: Handles pipeline events (transcripts) and sends to agent/TTS output
 async fn spawn_webrtc_audio_processor(
     transport: Arc<RwLock<WebRtcTransport>>,
     pipeline: Arc<Mutex<VoicePipeline>>,
@@ -397,10 +397,10 @@ async fn spawn_webrtc_audio_processor(
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
     let session_id = session.id.clone();
 
-    // Get audio source from transport
-    let audio_source = {
+    // Get audio source and sink from transport
+    let (audio_source, audio_sink) = {
         let guard = transport.read().await;
-        guard.audio_source()
+        (guard.audio_source(), guard.audio_sink())
     };
 
     // P1 FIX: Audio receiver task - receives WebRTC audio and feeds to pipeline
@@ -491,6 +491,8 @@ async fn spawn_webrtc_audio_processor(
 
     let pipeline_task = tokio::spawn(async move {
         let mut pipeline_events = pipeline.lock().await.subscribe();
+        // P2 FIX: Track timestamp for TTS audio output
+        let mut tts_timestamp_ms: u64 = 0;
 
         while let Ok(event) = pipeline_events.recv().await {
             match event {
@@ -519,8 +521,7 @@ async fn spawn_webrtc_audio_processor(
                                     response_len = response.len(),
                                     "Agent response generated for WebRTC"
                                 );
-                                // TODO: Send TTS audio back via WebRTC audio sink
-                                // For now, just log the response
+                                // TTS audio will come through PipelineEvent::TtsAudio
                             }
                             Err(e) => {
                                 tracing::error!(
@@ -547,13 +548,38 @@ async fn spawn_webrtc_audio_processor(
                     );
                 }
                 PipelineEvent::TtsAudio { samples, text: _, is_final } => {
-                    tracing::debug!(
-                        session_id = %session_id_for_pipeline,
-                        samples_len = samples.len(),
-                        is_final = is_final,
-                        "WebRTC TTS audio (would send via audio sink)"
-                    );
-                    // TODO: Encode to Opus and send via WebRTC audio sink
+                    // P2 FIX: Send TTS audio back via WebRTC audio sink
+                    if let Some(ref sink) = audio_sink {
+                        // Upsample from 16kHz to 48kHz for WebRTC (Opus expects 48kHz)
+                        let samples_48k: Vec<f32> = samples
+                            .iter()
+                            .flat_map(|&s| std::iter::repeat(s).take(3))
+                            .collect();
+
+                        if let Err(e) = sink.send_audio(&samples_48k, tts_timestamp_ms).await {
+                            tracing::debug!(
+                                session_id = %session_id_for_pipeline,
+                                error = %e,
+                                "Failed to send TTS audio via WebRTC"
+                            );
+                        } else {
+                            tracing::debug!(
+                                session_id = %session_id_for_pipeline,
+                                samples_len = samples_48k.len(),
+                                is_final = is_final,
+                                "Sent TTS audio via WebRTC"
+                            );
+                        }
+                        // Advance timestamp by duration (samples at 48kHz)
+                        tts_timestamp_ms += (samples_48k.len() as u64 * 1000) / 48000;
+                    } else {
+                        tracing::debug!(
+                            session_id = %session_id_for_pipeline,
+                            samples_len = samples.len(),
+                            is_final = is_final,
+                            "WebRTC TTS audio (no audio sink available)"
+                        );
+                    }
                 }
                 PipelineEvent::BargeIn { at_word } => {
                     tracing::debug!(
@@ -561,6 +587,10 @@ async fn spawn_webrtc_audio_processor(
                         at_word = at_word,
                         "WebRTC barge-in detected"
                     );
+                    // P2 FIX: Flush any pending TTS audio on barge-in
+                    if let Some(ref sink) = audio_sink {
+                        let _ = sink.flush().await;
+                    }
                 }
                 PipelineEvent::Error(e) => {
                     tracing::error!(

@@ -38,11 +38,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "ScyllaDB persistence initialized"
                 );
                 let scylla_store = ScyllaSessionStore::new(persistence.sessions);
+                // P2 FIX: Wire audit logging for RBI compliance
+                let audit_log: Arc<dyn voice_agent_persistence::AuditLog> = Arc::new(persistence.audit);
                 AppState::with_session_store_and_domain(
                     config.clone(),
                     Arc::new(scylla_store),
                     domain_config,
-                )
+                ).with_audit_logger(audit_log)
             }
             Err(e) => {
                 tracing::error!("Failed to initialize ScyllaDB: {}. Falling back to in-memory.", e);
@@ -77,6 +79,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rag_enabled = state.vector_store.is_some(),
         "Initialized application state"
     );
+
+    // P2 FIX: Attempt to recover sessions from previous run
+    if state.is_distributed_sessions() {
+        match state.recover_sessions().await {
+            Ok(count) => {
+                if count > 0 {
+                    tracing::info!(recovered = count, "Session recovery complete");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Session recovery failed (non-fatal)");
+            }
+        }
+    }
 
     // Create router
     let app = create_router(state);

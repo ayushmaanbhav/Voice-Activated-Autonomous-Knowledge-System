@@ -218,6 +218,51 @@ impl IntentDetector {
                     "Nahi".to_string(),
                 ],
             },
+            // P1 FIX: Add missing intents for orphaned tools
+            Intent {
+                name: "gold_price".to_string(),
+                description: "User asking about gold price".to_string(),
+                required_slots: vec![],
+                optional_slots: vec![],
+                examples: vec![
+                    "What is the gold price".to_string(),
+                    "Gold rate today".to_string(),
+                    "Sona ka bhav".to_string(),
+                    "Current gold rate".to_string(),
+                    "Aaj ka gold price".to_string(),
+                    "Gold kitne ka hai".to_string(),
+                ],
+            },
+            Intent {
+                name: "escalate".to_string(),
+                description: "User wants to speak to human agent".to_string(),
+                required_slots: vec![],
+                optional_slots: vec![],
+                examples: vec![
+                    "Talk to human".to_string(),
+                    "Speak to agent".to_string(),
+                    "I want a real person".to_string(),
+                    "Connect me to human".to_string(),
+                    "Aadmi se baat karo".to_string(),
+                    "Insaan se connect karo".to_string(),
+                    "Manager se baat karni hai".to_string(),
+                ],
+            },
+            Intent {
+                name: "send_sms".to_string(),
+                description: "User wants information via SMS".to_string(),
+                required_slots: vec![],
+                optional_slots: vec!["phone_number".to_string()],
+                examples: vec![
+                    "Send me details".to_string(),
+                    "SMS me the information".to_string(),
+                    "Text me".to_string(),
+                    "Send sms".to_string(),
+                    "Message bhejo".to_string(),
+                    "Details SMS karo".to_string(),
+                    "Mujhe message karo".to_string(),
+                ],
+            },
         ];
 
         *self.intents.write() = intents;
