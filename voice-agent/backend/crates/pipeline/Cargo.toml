@@ -10,6 +10,8 @@ description = "Audio pipeline with VAD, STT, TTS, and turn detection"
 default = []
 onnx = ["dep:ort"]
 candle = ["dep:candle-core", "dep:candle-nn", "dep:safetensors"]
+# P2-1: Audio processing (noise suppression)
+noise-suppression = ["dep:nnnoiseless"]
 
 [dependencies]
 voice-agent-core.workspace = true
@@ -36,6 +38,8 @@ safetensors = { workspace = true, optional = true }
 rubato.workspace = true
 hound.workspace = true
 realfft = "3.3"
+# P2-1: Noise suppression (pure Rust RNNoise port)
+nnnoiseless = { version = "0.5", optional = true }
 
 # Serialization
 serde = { workspace = true, features = ["derive"] }

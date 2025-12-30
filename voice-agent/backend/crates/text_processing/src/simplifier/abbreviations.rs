@@ -143,11 +143,8 @@ static ABBREVIATIONS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     map
 });
 
-/// Pattern for detecting abbreviation candidates
-static ABBREV_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    // Match uppercase sequences (2+ letters) or known abbreviations
-    Regex::new(r"\b([A-Z]{2,}|[a-z]{2,4})\b").unwrap()
-});
+// P2-2: Removed unused ABBREV_PATTERN
+// (AbbreviationExpander creates patterns dynamically in expand())
 
 /// Abbreviation expander for TTS
 pub struct AbbreviationExpander {

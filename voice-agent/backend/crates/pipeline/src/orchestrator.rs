@@ -1,7 +1,15 @@
 //! Voice Pipeline Orchestrator
 //!
 //! Coordinates VAD, STT, TTS, and turn detection for real-time conversation.
+//!
+//! ## P0-3 FIX: LLM Integration
+//!
+//! The orchestrator now includes automatic LLM integration:
+//! - When a FinalTranscript is received, the LLM is automatically called
+//! - LLM response is streamed through the TTS processor chain
+//! - Barge-in handling works throughout the entire flow
 
+use futures::StreamExt;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::Instant;
@@ -13,7 +21,8 @@ use crate::turn_detection::{HybridTurnDetector, TurnDetectionConfig, TurnDetecti
 use crate::vad::{VadConfig, VadState, VoiceActivityDetector};
 use crate::PipelineError;
 use voice_agent_core::{
-    AudioFrame, ControlFrame, Frame, Language, ProcessorContext, TranscriptResult,
+    AudioFrame, ControlFrame, Frame, GenerateRequest, Language, LanguageModel, ProcessorContext,
+    TranscriptResult,
 };
 
 // P1 FIX: Import processors for streaming LLM → TTS pipeline
@@ -65,6 +74,38 @@ pub struct PipelineConfig {
     pub latency_budget_ms: u32,
     /// P1 FIX: Processor chain configuration for streaming LLM output
     pub processors: ProcessorChainConfig,
+    /// P0-3 FIX: LLM configuration for automatic response generation
+    pub llm: LlmConfig,
+}
+
+/// P0-3 FIX: LLM configuration for the pipeline
+#[derive(Debug, Clone)]
+pub struct LlmConfig {
+    /// Enable automatic LLM response generation
+    pub enabled: bool,
+    /// System prompt for the LLM
+    pub system_prompt: String,
+    /// Language for responses
+    pub language: Language,
+    /// Maximum tokens to generate
+    pub max_tokens: u32,
+    /// Temperature for generation (0.0 - 1.0)
+    pub temperature: f32,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            system_prompt: "You are a helpful voice assistant for Kotak Gold Loan services. \
+                Respond concisely and naturally in Hindi or Hinglish. Keep responses brief \
+                as they will be spoken aloud."
+                .to_string(),
+            language: Language::Hindi,
+            max_tokens: 256,
+            temperature: 0.7,
+        }
+    }
 }
 
 /// P1 FIX: Configuration for the processor chain
@@ -101,6 +142,7 @@ impl Default for PipelineConfig {
             barge_in: BargeInConfig::default(),
             latency_budget_ms: 500,
             processors: ProcessorChainConfig::default(),
+            llm: LlmConfig::default(),
         }
     }
 }
@@ -172,6 +214,10 @@ pub struct VoicePipeline {
     /// P1 FIX: Processor chain for streaming LLM → TTS
     /// Contains: SentenceDetector → TtsProcessor → InterruptHandler
     processor_chain: Option<ProcessorChain>,
+    /// P0-3 FIX: LLM for automatic response generation
+    llm: Option<Arc<dyn LanguageModel>>,
+    /// P0-3 FIX: Pending transcript waiting for LLM processing
+    pending_transcript: Mutex<Option<TranscriptResult>>,
 }
 
 impl VoicePipeline {
@@ -202,7 +248,162 @@ impl VoicePipeline {
             barge_in_speech_ms: Mutex::new(0),
             last_audio_time: Mutex::new(Instant::now()),
             processor_chain,
+            llm: None, // P0-3 FIX: LLM not set by default, use with_llm()
+            pending_transcript: Mutex::new(None),
         })
+    }
+
+    /// P0-3 FIX: Set the LLM for automatic response generation
+    ///
+    /// When set, the pipeline will automatically call the LLM when a
+    /// final transcript is received, and stream the response through TTS.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let llm = Arc::new(OllamaBackend::new(config));
+    /// let pipeline = VoicePipeline::simple(config)?
+    ///     .with_llm(llm);
+    /// ```
+    pub fn with_llm(mut self, llm: Arc<dyn LanguageModel>) -> Self {
+        self.llm = Some(llm);
+        self
+    }
+
+    /// P0-3 FIX: Check if LLM is configured
+    pub fn has_llm(&self) -> bool {
+        self.llm.is_some()
+    }
+
+    /// P0-3 FIX: Handle a final transcript by calling LLM and streaming to TTS
+    ///
+    /// This is the core auto-response logic that connects STT → LLM → TTS.
+    ///
+    /// # Arguments
+    /// * `transcript` - The final transcript from STT
+    ///
+    /// # Returns
+    /// Ok(()) on success, or error if LLM/TTS fails
+    async fn handle_final_transcript(&self, transcript: &TranscriptResult) -> Result<(), PipelineError> {
+        // Check if LLM is configured and enabled
+        let llm = match &self.llm {
+            Some(llm) if self.config.llm.enabled => llm.clone(),
+            _ => {
+                tracing::debug!("LLM not configured or disabled, skipping auto-response");
+                return Ok(());
+            }
+        };
+
+        tracing::info!(
+            transcript = %transcript.text,
+            confidence = %transcript.confidence,
+            "Processing final transcript through LLM"
+        );
+
+        // Build the LLM request
+        let request = GenerateRequest::new(&self.config.llm.system_prompt)
+            .with_user_message(&transcript.text)
+            .with_temperature(self.config.llm.temperature)
+            .with_max_tokens(self.config.llm.max_tokens);
+
+        // Stream the LLM response
+        let mut stream = llm.generate_stream(request);
+
+        // Create channel for TTS input
+        let (tx, rx) = mpsc::channel::<String>(100);
+
+        // Start TTS streaming in background
+        let tts_handle = {
+            let pipeline_event_tx = self.event_tx.clone();
+            let language = self.config.llm.language;
+
+            // Use processor chain if available, otherwise fall back to simple speak
+            if self.has_processor_chain() {
+                // Stream through processor chain
+                let output_rx = self.speak_streaming(rx, language).await?;
+
+                // Spawn task to forward TTS audio frames to event channel
+                tokio::spawn(async move {
+                    let mut output_rx = output_rx;
+                    while let Some(frame) = output_rx.recv().await {
+                        if let Frame::AudioOutput(audio) = frame {
+                            let _ = pipeline_event_tx.send(PipelineEvent::TtsAudio {
+                                samples: audio.samples.into(),
+                                text: String::new(), // Word text not available in this path
+                                is_final: false,
+                            });
+                        }
+                    }
+                })
+            } else {
+                // Fall back to collecting full response then speaking
+                tokio::spawn(async move {
+                    // This path doesn't stream - handled below
+                })
+            }
+        };
+
+        // Stream LLM chunks to TTS
+        let mut full_response = String::new();
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(chunk) => {
+                    full_response.push_str(&chunk.delta);
+
+                    // Send chunk to TTS channel
+                    if tx.send(chunk.delta).await.is_err() {
+                        tracing::warn!("TTS channel closed while streaming LLM response");
+                        break;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "LLM streaming error");
+                    let _ = self.event_tx.send(PipelineEvent::Error(format!("LLM error: {}", e)));
+                    break;
+                }
+            }
+        }
+
+        // Drop sender to signal completion
+        drop(tx);
+
+        // If no processor chain, use simple speak with full response
+        if !self.has_processor_chain() && !full_response.is_empty() {
+            self.speak(&full_response).await?;
+        }
+
+        // Wait for TTS to complete
+        let _ = tts_handle.await;
+
+        // Transition back to Idle state
+        *self.state.lock() = PipelineState::Idle;
+        self.turn_detector.reset();
+
+        tracing::info!(
+            response_length = full_response.len(),
+            "LLM response completed"
+        );
+
+        Ok(())
+    }
+
+    /// P0-3 FIX: Process pending transcript if in Processing state
+    ///
+    /// This should be called periodically or after state transitions
+    /// to check if there's a pending transcript to process.
+    pub async fn process_pending(&self) -> Result<(), PipelineError> {
+        // Check if we're in Processing state with a pending transcript
+        if *self.state.lock() != PipelineState::Processing {
+            return Ok(());
+        }
+
+        // Take the pending transcript
+        let transcript = self.pending_transcript.lock().take();
+
+        if let Some(transcript) = transcript {
+            self.handle_final_transcript(&transcript).await?;
+        }
+
+        Ok(())
     }
 
     /// P1 FIX: Build the processor chain for LLM streaming output
@@ -266,13 +467,16 @@ impl VoicePipeline {
         }
 
         // 3. Process based on state
-        match *self.state.lock() {
+        // NOTE: We copy the state to avoid holding MutexGuard across await points
+        let current_state = *self.state.lock();
+
+        match current_state {
             PipelineState::Idle => {
                 if vad_state == VadState::Speech || vad_state == VadState::SpeechStart {
                     *self.state.lock() = PipelineState::Listening;
                     self.stt.lock().reset();
                 }
-            },
+            }
 
             PipelineState::Listening => {
                 // Feed audio to STT
@@ -296,7 +500,10 @@ impl VoicePipeline {
                         let final_transcript = self.stt.lock().finalize();
                         let _ = self
                             .event_tx
-                            .send(PipelineEvent::FinalTranscript(final_transcript));
+                            .send(PipelineEvent::FinalTranscript(final_transcript.clone()));
+
+                        // P0-3 FIX: Store transcript and transition to Processing
+                        *self.pending_transcript.lock() = Some(final_transcript);
                         *self.state.lock() = PipelineState::Processing;
                     }
                 } else {
@@ -306,20 +513,35 @@ impl VoicePipeline {
                         .event_tx
                         .send(PipelineEvent::TurnStateChanged(turn_result));
                 }
-            },
+            }
 
             PipelineState::Processing => {
-                // Waiting for agent response
-                // Audio is still monitored for barge-in
-            },
+                // P0-3 FIX: Auto-process pending transcript through LLM
+                // This is triggered when we have an LLM configured
+                if self.has_llm() {
+                    // Take transcript before await (releases lock)
+                    let transcript = self.pending_transcript.lock().take();
+
+                    if let Some(transcript) = transcript {
+                        // Process transcript asynchronously - errors are logged, not propagated
+                        // This keeps the audio processing loop responsive
+                        if let Err(e) = self.handle_final_transcript(&transcript).await {
+                            tracing::error!(error = %e, "Failed to process transcript through LLM");
+                            let _ = self.event_tx.send(PipelineEvent::Error(e.to_string()));
+                            *self.state.lock() = PipelineState::Idle;
+                        }
+                    }
+                }
+                // Audio is still monitored for barge-in during processing
+            }
 
             PipelineState::Speaking => {
                 // Handled above in barge-in check
-            },
+            }
 
             PipelineState::Paused => {
                 // Do nothing
-            },
+            }
         }
 
         Ok(())

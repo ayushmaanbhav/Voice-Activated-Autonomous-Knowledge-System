@@ -101,6 +101,10 @@ pub enum AgentError {
 
     #[error("Timeout")]
     Timeout,
+
+    /// P1-2 FIX: Initialization errors (e.g., speculative executor setup)
+    #[error("Initialization error: {0}")]
+    Initialization(String),
 }
 
 impl From<voice_agent_pipeline::PipelineError> for AgentError {

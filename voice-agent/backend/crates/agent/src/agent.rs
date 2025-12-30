@@ -7,7 +7,8 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use voice_agent_llm::{
-    LanguageModelAdapter, LlmConfig, Message, OllamaBackend, PromptBuilder, Role,
+    LlmFactory, LlmProviderConfig, Message, PromptBuilder, Role, SpeculativeConfig,
+    SpeculativeExecutor, SpeculativeMode,
 };
 // P1 FIX: Use LanguageModel trait from core for proper abstraction
 use voice_agent_core::LanguageModel;
@@ -53,6 +54,10 @@ pub struct AgentConfig {
     pub context_window_tokens: usize,
     /// P4 FIX: RAG timing strategy for prefetch behavior
     pub rag_timing_strategy: RagTimingStrategy,
+    /// P1-1 FIX: LLM provider configuration (supports Claude, Ollama, OpenAI, Azure)
+    pub llm_provider: LlmProviderConfig,
+    /// P1-2 FIX: Speculative decoding configuration (SLM + LLM)
+    pub speculative: SpeculativeDecodingConfig,
 }
 
 /// P1 FIX: Configurable default values for tool calls
@@ -82,6 +87,79 @@ impl Default for ToolDefaults {
     }
 }
 
+/// P1-2 FIX: Speculative decoding configuration
+///
+/// Configures the small (SLM) and large (LLM) models for speculative execution.
+/// The SLM drafts responses quickly, and the LLM verifies/improves them.
+#[derive(Debug, Clone)]
+pub struct SpeculativeDecodingConfig {
+    /// Enable speculative decoding
+    pub enabled: bool,
+    /// Speculative execution mode
+    pub mode: SpeculativeMode,
+    /// Small model (SLM) configuration - fast, for drafting
+    pub slm: LlmProviderConfig,
+    /// Large model (LLM) configuration - accurate, for verification
+    pub llm: LlmProviderConfig,
+    /// Speculative execution parameters
+    pub params: SpeculativeConfig,
+}
+
+impl Default for SpeculativeDecodingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Disabled by default, requires explicit opt-in
+            mode: SpeculativeMode::SlmFirst,
+            // Small model for fast drafting (Ollama)
+            slm: LlmProviderConfig::ollama("llama3.2:1b"),
+            // Large model for verification (Ollama)
+            llm: LlmProviderConfig::ollama("llama3.2:3b"),
+            params: SpeculativeConfig::default(),
+        }
+    }
+}
+
+impl SpeculativeDecodingConfig {
+    /// Create Ollama-based speculative config
+    pub fn ollama(slm_model: impl Into<String>, llm_model: impl Into<String>) -> Self {
+        Self {
+            enabled: true,
+            mode: SpeculativeMode::SlmFirst,
+            slm: LlmProviderConfig::ollama(slm_model),
+            llm: LlmProviderConfig::ollama(llm_model),
+            params: SpeculativeConfig::default(),
+        }
+    }
+
+    /// Set speculative mode
+    pub fn with_mode(mut self, mode: SpeculativeMode) -> Self {
+        self.mode = mode;
+        self.params.mode = mode;
+        self
+    }
+
+    /// Enable draft-verify mode (good balance of speed and quality)
+    pub fn draft_verify(mut self) -> Self {
+        self.mode = SpeculativeMode::DraftVerify;
+        self.params.mode = SpeculativeMode::DraftVerify;
+        self
+    }
+
+    /// Enable race-parallel mode (lowest latency, highest cost)
+    pub fn race_parallel(mut self) -> Self {
+        self.mode = SpeculativeMode::RaceParallel;
+        self.params.mode = SpeculativeMode::RaceParallel;
+        self
+    }
+
+    /// Enable hybrid streaming mode (adaptive quality)
+    pub fn hybrid_streaming(mut self) -> Self {
+        self.mode = SpeculativeMode::HybridStreaming;
+        self.params.mode = SpeculativeMode::HybridStreaming;
+        self
+    }
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -96,6 +174,12 @@ impl Default for AgentConfig {
             context_window_tokens: 4096,
             // P4 FIX: Default to conservative prefetch strategy
             rag_timing_strategy: RagTimingStrategy::default(),
+            // P1-1 FIX: Default to Ollama for local development
+            // Can be overridden via config to use Claude, OpenAI, or Azure
+            llm_provider: LlmProviderConfig::ollama("llama3.2"),
+            // P1-2 FIX: Speculative decoding disabled by default
+            // Enable via config with speculative.enabled = true
+            speculative: SpeculativeDecodingConfig::default(),
         }
     }
 }
@@ -164,6 +248,9 @@ pub struct GoldLoanAgent {
     user_language: Language,
     /// P0 FIX: Persuasion engine for objection handling
     persuasion: PersuasionEngine,
+    /// P1-2 FIX: Speculative executor for low-latency generation
+    /// Uses SLM for fast drafts, LLM for verification/improvement
+    speculative: Option<Arc<SpeculativeExecutor>>,
 }
 
 impl GoldLoanAgent {
@@ -175,13 +262,26 @@ impl GoldLoanAgent {
 
         let tools = Arc::new(voice_agent_tools::registry::create_default_registry());
 
-        // Try to create LLM backend (Ollama on localhost)
-        // P1 FIX: Use LanguageModelAdapter to wrap LlmBackend for proper abstraction
-        // This allows the agent to use the core::LanguageModel trait which supports
-        // tool calling and streaming in a provider-agnostic way.
-        let llm: Option<Arc<dyn LanguageModel>> = OllamaBackend::new(LlmConfig::default())
-            .map(|backend| Arc::new(LanguageModelAdapter::new(backend)) as Arc<dyn LanguageModel>)
-            .ok();
+        // P1-1 FIX: Use LlmFactory for provider-agnostic LLM creation
+        // Supports Claude, Ollama, OpenAI, and Azure based on config.llm_provider
+        let llm: Option<Arc<dyn LanguageModel>> = match LlmFactory::create(&config.llm_provider) {
+            Ok(llm) => {
+                tracing::info!(
+                    provider = ?config.llm_provider.provider,
+                    model = %config.llm_provider.model,
+                    "LLM backend initialized successfully"
+                );
+                Some(llm)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    provider = ?config.llm_provider.provider,
+                    error = %e,
+                    "Failed to create LLM backend, falling back to None"
+                );
+                None
+            }
+        };
 
         // P1 FIX: Create RAG retriever if enabled
         let retriever = if config.rag_enabled {
@@ -232,6 +332,30 @@ impl GoldLoanAgent {
         // P0 FIX: Initialize persuasion engine for objection handling
         let persuasion = PersuasionEngine::new();
 
+        // P1-2 FIX: Initialize speculative executor if enabled
+        let speculative = if config.speculative.enabled {
+            match Self::create_speculative_executor(&config.speculative) {
+                Ok(executor) => {
+                    tracing::info!(
+                        mode = ?config.speculative.mode,
+                        slm_model = %config.speculative.slm.model,
+                        llm_model = %config.speculative.llm.model,
+                        "Speculative executor initialized"
+                    );
+                    Some(Arc::new(executor))
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to create speculative executor, falling back to direct LLM"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
             config,
             conversation,
@@ -246,7 +370,25 @@ impl GoldLoanAgent {
             translator,
             user_language,
             persuasion,
+            speculative,
         }
+    }
+
+    /// P1-2 FIX: Create speculative executor with SLM and LLM backends
+    fn create_speculative_executor(
+        config: &SpeculativeDecodingConfig,
+    ) -> Result<SpeculativeExecutor, crate::AgentError> {
+        // Create SLM backend (small/fast model)
+        let slm = LlmFactory::create_backend(&config.slm).map_err(|e| {
+            crate::AgentError::Initialization(format!("Failed to create SLM backend: {}", e))
+        })?;
+
+        // Create LLM backend (large/accurate model)
+        let llm = LlmFactory::create_backend(&config.llm).map_err(|e| {
+            crate::AgentError::Initialization(format!("Failed to create LLM backend: {}", e))
+        })?;
+
+        Ok(SpeculativeExecutor::new(slm, llm, config.params.clone()))
     }
 
     /// Create agent with custom LLM backend
@@ -293,6 +435,15 @@ impl GoldLoanAgent {
         // P0 FIX: Initialize persuasion engine for objection handling
         let persuasion = PersuasionEngine::new();
 
+        // P1-2 FIX: Initialize speculative executor if enabled
+        let speculative = if config.speculative.enabled {
+            Self::create_speculative_executor(&config.speculative)
+                .map(Arc::new)
+                .ok()
+        } else {
+            None
+        };
+
         Self {
             config,
             conversation,
@@ -307,6 +458,7 @@ impl GoldLoanAgent {
             translator,
             user_language,
             persuasion,
+            speculative,
         }
     }
 
@@ -360,6 +512,7 @@ impl GoldLoanAgent {
             translator,
             user_language,
             persuasion,
+            speculative: None, // P1-2 FIX: No speculative without LLM
         }
     }
 
@@ -1382,26 +1535,66 @@ impl GoldLoanAgent {
             "Using stage-aware context budget"
         );
 
-        // P1 FIX: Use build_request_with_limit for LanguageModel trait
-        let request = builder.build_request_with_limit(effective_budget);
+        // P1-2 FIX: Try speculative execution first if enabled and appropriate
+        // Speculative doesn't support tool calling, so only use for non-tool responses
+        let tool_defs: Vec<ToolDefinition> = if self.config.tools_enabled {
+            self.tools
+                .list_tools()
+                .iter()
+                .map(ToolDefinition::from_schema)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let has_tools = !tool_defs.is_empty();
+
+        // P1-2 FIX: Use speculative executor when available and no tools needed
+        if let Some(ref speculative) = self.speculative {
+            if !has_tools {
+                // Build messages for speculative executor (uses llm crate's Message type)
+                let messages = builder.build_with_limit(effective_budget);
+
+                tracing::debug!(
+                    mode = ?self.config.speculative.mode,
+                    message_count = messages.len(),
+                    "Using speculative executor"
+                );
+
+                match speculative.execute(&messages).await {
+                    Ok(result) => {
+                        tracing::debug!(
+                            model_used = ?result.model_used,
+                            used_fallback = result.used_fallback,
+                            complexity = ?result.complexity_score,
+                            tokens = result.generation.tokens,
+                            "Speculative execution succeeded"
+                        );
+                        return Ok(result.text);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "Speculative execution failed, falling back to direct LLM"
+                        );
+                        // Fall through to direct LLM path
+                    }
+                }
+            } else {
+                tracing::debug!(
+                    "Skipping speculative executor - tool calling required"
+                );
+            }
+        }
+
+        // P1 FIX: Use build_request_with_limit for LanguageModel trait (fallback path)
+        // Rebuild the request since speculative may have consumed the builder
+        let request = self.build_llm_request(user_input, tool_result).await?;
 
         // Try to use LLM backend if available
         if let Some(ref llm) = self.llm {
             // Check if LLM is available
             if llm.is_available().await {
-                // P0-2 FIX: Use generate_with_tools for LLM tool calling
-                // Convert tool schemas to tool definitions for the LLM
-                let tool_defs: Vec<ToolDefinition> = if self.config.tools_enabled {
-                    self.tools
-                        .list_tools()
-                        .iter()
-                        .map(ToolDefinition::from_schema)
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-
-                let has_tools = !tool_defs.is_empty();
                 tracing::debug!(
                     tool_count = tool_defs.len(),
                     tools_enabled = self.config.tools_enabled,

@@ -30,6 +30,10 @@ pub use stt::{DecoderConfig, EnhancedDecoder, StreamingStt, SttConfig, SttEngine
 
 // TTS exports
 pub use tts::{ChunkStrategy, StreamingTts, TtsConfig, TtsEngine, TtsEvent, WordChunker};
+// P1-3 FIX: Export TTS backend types and factory
+pub use tts::{create_tts_backend, StubTtsBackend, TtsBackend};
+#[cfg(feature = "candle")]
+pub use tts::{IndicF5Backend, IndicF5Config, IndicF5Model};
 
 // Orchestrator exports
 pub use orchestrator::{
@@ -47,6 +51,8 @@ pub use orchestrator::{
 pub use processors::{
     InterruptHandler, InterruptHandlerConfig, InterruptMode, ProcessorChain, ProcessorChainBuilder,
     SentenceDetector, SentenceDetectorConfig, TtsProcessor, TtsProcessorConfig,
+    // P2-2 FIX: Export generic processors for extensibility
+    FilterProcessor, MapProcessor, PassthroughProcessor,
 };
 
 // P3 FIX: Trait adapter exports - bridge internal STT/TTS with core traits
@@ -58,7 +64,11 @@ pub use adapters::{
     PassthroughAudioProcessor,
     SttAdapter,
     TtsAdapter,
+    // P2-1 FIX: Noise suppression processor
+    create_noise_suppressor,
 };
+#[cfg(feature = "noise-suppression")]
+pub use adapters::NoiseSuppressorProcessor;
 
 use thiserror::Error;
 

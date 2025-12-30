@@ -11,36 +11,8 @@ use regex::Regex;
 use std::collections::HashSet;
 use voice_agent_core::{DetectionMethod, PIIEntity, PIIType};
 
-/// Indian name prefixes/titles (English)
-static ENGLISH_TITLES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
-    [
-        "mr", "mr.", "mrs", "mrs.", "ms", "ms.", "miss", "dr", "dr.", "prof", "prof.", "sir",
-        "shri", "shree", "smt", "smt.", "kumari", "master", "late", "capt", "capt.", "col", "col.",
-        "maj", "maj.",
-    ]
-    .into_iter()
-    .collect()
-});
-
-/// Hindi titles in Devanagari
-static HINDI_TITLES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
-    [
-        "श्री",
-        "श्रीमती",
-        "सुश्री",
-        "कुमारी",
-        "डॉ",
-        "डॉ.",
-        "प्रो",
-        "प्रो.",
-        "स्वर्गीय",
-        "कैप्टन",
-        "कर्नल",
-        "मेजर",
-    ]
-    .into_iter()
-    .collect()
-});
+// P2-2: Removed unused ENGLISH_TITLES and HINDI_TITLES static HashSets
+// (Title detection is handled by regex patterns in NERPatterns instead)
 
 /// Common Indian first names for validation
 static COMMON_FIRST_NAMES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
@@ -366,8 +338,8 @@ pub struct NERPatterns {
     hindi_title_name: Regex,
     /// Pattern: Indian pincode (6 digits)
     pincode: Regex,
-    /// Pattern: Address with pincode
-    address_with_pincode: Regex,
+    // P2-2: Removed unused address_with_pincode field
+    // (detect_addresses uses pincode-based lookback instead)
 }
 
 impl Default for NERPatterns {
@@ -392,11 +364,6 @@ impl NERPatterns {
 
             // Indian pincode: 6 digits, first digit 1-9
             pincode: Regex::new(r"\b[1-9]\d{5}\b").unwrap(),
-
-            // Address ending with pincode
-            address_with_pincode: Regex::new(
-                r"(?i)(?:[\w\s,.-]+(?:road|rd|street|st|lane|colony|nagar|vihar|sector|block|floor|flat|apartment|building|society|near|marg|gali|mohalla)[\w\s,.-]*)[,\s]+([1-9]\d{5})\b"
-            ).unwrap(),
         }
     }
 }

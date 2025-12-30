@@ -1,6 +1,12 @@
 //! Streaming TTS Engine
 //!
 //! Word-level streaming with barge-in support.
+//!
+//! ## P0-1 FIX: Engine Routing
+//!
+//! StreamingTts now supports multiple backends via the `TtsBackend` trait:
+//! - Use `StreamingTts::with_backend()` for production with real TTS
+//! - Use `StreamingTts::simple()` for testing with silence output
 
 use parking_lot::Mutex;
 use std::path::Path;
@@ -13,7 +19,7 @@ use ndarray::Array2;
 use ort::{GraphOptimizationLevel, Session};
 
 use super::chunker::{ChunkStrategy, ChunkerConfig, TextChunk, WordChunker};
-use super::TtsBackend;
+use super::{create_tts_backend, TtsBackend};
 use crate::PipelineError;
 
 /// TTS engine selection
@@ -44,6 +50,10 @@ pub struct TtsConfig {
     pub chunk_strategy: ChunkStrategy,
     /// Enable prosody hints
     pub prosody_hints: bool,
+    /// P0-1 FIX: Path to the TTS model (required for IndicF5, Piper, etc.)
+    pub model_path: Option<std::path::PathBuf>,
+    /// P0-1 FIX: Path to reference audio for voice cloning (IndicF5)
+    pub reference_audio_path: Option<std::path::PathBuf>,
 }
 
 impl Default for TtsConfig {
@@ -56,6 +66,34 @@ impl Default for TtsConfig {
             pitch: 1.0,
             chunk_strategy: ChunkStrategy::Adaptive,
             prosody_hints: true,
+            model_path: None,
+            reference_audio_path: None,
+        }
+    }
+}
+
+impl TtsConfig {
+    /// P0-1 FIX: Create config for IndicF5 engine
+    pub fn indicf5(model_path: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            engine: TtsEngine::IndicF5,
+            sample_rate: 24000, // IndicF5 uses 24kHz
+            model_path: Some(model_path.into()),
+            ..Default::default()
+        }
+    }
+
+    /// P0-1 FIX: Create config for IndicF5 with reference audio
+    pub fn indicf5_with_reference(
+        model_path: impl Into<std::path::PathBuf>,
+        reference_path: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            engine: TtsEngine::IndicF5,
+            sample_rate: 24000,
+            model_path: Some(model_path.into()),
+            reference_audio_path: Some(reference_path.into()),
+            ..Default::default()
         }
     }
 }
@@ -89,9 +127,11 @@ pub enum TtsEvent {
 
 /// Streaming TTS processor
 pub struct StreamingTts {
-    /// ONNX session (None for simple/testing mode)
+    /// ONNX session (None for simple/testing mode) - legacy, prefer backend
     #[cfg(feature = "onnx")]
     session: Option<Session>,
+    /// P0-1 FIX: TTS backend for actual synthesis
+    backend: Option<Arc<dyn TtsBackend>>,
     config: TtsConfig,
     chunker: Mutex<WordChunker>,
     /// Is currently synthesizing?
@@ -103,7 +143,7 @@ pub struct StreamingTts {
 }
 
 impl StreamingTts {
-    /// Create a new streaming TTS
+    /// Create a new streaming TTS (legacy ONNX mode)
     #[cfg(feature = "onnx")]
     pub fn new(model_path: impl AsRef<Path>, config: TtsConfig) -> Result<Self, PipelineError> {
         let session = Session::builder()
@@ -122,6 +162,7 @@ impl StreamingTts {
 
         Ok(Self {
             session: Some(session),
+            backend: None,
             config,
             chunker: Mutex::new(WordChunker::new(chunker_config)),
             synthesizing: Mutex::new(false),
@@ -136,7 +177,53 @@ impl StreamingTts {
         Ok(Self::simple(config))
     }
 
-    /// Create a simple TTS for testing (no ONNX model required)
+    /// P0-1 FIX: Create streaming TTS with a specific backend
+    ///
+    /// This is the recommended constructor for production use.
+    /// Use `create_tts_backend()` to create the appropriate backend.
+    pub fn with_backend(backend: Arc<dyn TtsBackend>, config: TtsConfig) -> Self {
+        let chunker_config = ChunkerConfig {
+            strategy: config.chunk_strategy,
+            ..Default::default()
+        };
+
+        let sample_rate = backend.sample_rate();
+        let mut config = config;
+        config.sample_rate = sample_rate;
+
+        Self {
+            #[cfg(feature = "onnx")]
+            session: None,
+            backend: Some(backend),
+            config,
+            chunker: Mutex::new(WordChunker::new(chunker_config)),
+            synthesizing: Mutex::new(false),
+            barge_in: Mutex::new(false),
+            current_word: Mutex::new(0),
+        }
+    }
+
+    /// P0-1 FIX: Create streaming TTS from config (auto-creates backend)
+    ///
+    /// Automatically creates the appropriate backend based on TtsConfig.engine
+    pub fn from_config(config: TtsConfig) -> Result<Self, PipelineError> {
+        // Load reference audio if specified
+        let reference_audio = if let Some(ref path) = config.reference_audio_path {
+            Some(load_reference_audio(path)?)
+        } else {
+            None
+        };
+
+        let backend = create_tts_backend(
+            config.engine,
+            config.model_path.as_deref(),
+            reference_audio,
+        )?;
+
+        Ok(Self::with_backend(backend, config))
+    }
+
+    /// Create a simple TTS for testing (no model required, returns silence)
     pub fn simple(config: TtsConfig) -> Self {
         let chunker_config = ChunkerConfig {
             strategy: config.chunk_strategy,
@@ -146,6 +233,7 @@ impl StreamingTts {
         Self {
             #[cfg(feature = "onnx")]
             session: None, // No model - will use stub synthesis
+            backend: None,
             config,
             chunker: Mutex::new(WordChunker::new(chunker_config)),
             synthesizing: Mutex::new(false),
@@ -210,9 +298,30 @@ impl StreamingTts {
     }
 
     /// Synthesize a single chunk
+    ///
+    /// P0-1 FIX: Now routes to the configured backend if available
     #[cfg(feature = "onnx")]
     fn synthesize_chunk(&self, chunk: &TextChunk) -> Result<Vec<f32>, PipelineError> {
-        // If no model loaded, use stub synthesis
+        // P0-1 FIX: Use backend if available (preferred path)
+        if let Some(ref backend) = self.backend {
+            // Backend synthesis is async, but we're in a sync context
+            // Use block_in_place to run async code
+            let text = chunk.text.clone();
+            let backend = backend.clone();
+
+            let audio = std::thread::scope(|_| {
+                tokio::runtime::Handle::try_current()
+                    .map(|handle| handle.block_on(backend.synthesize(&text)))
+                    .unwrap_or_else(|_| {
+                        // No runtime, use blocking
+                        Err(PipelineError::Tts("No tokio runtime available".to_string()))
+                    })
+            })?;
+
+            return Ok(audio);
+        }
+
+        // Legacy ONNX path: If no backend but ONNX session exists, use it
         let session = match &self.session {
             Some(s) => s,
             None => {
@@ -254,8 +363,26 @@ impl StreamingTts {
     }
 
     /// Synthesize a single chunk (stub when ONNX disabled)
+    ///
+    /// P0-1 FIX: Now routes to the configured backend if available
     #[cfg(not(feature = "onnx"))]
     fn synthesize_chunk(&self, chunk: &TextChunk) -> Result<Vec<f32>, PipelineError> {
+        // P0-1 FIX: Use backend if available
+        if let Some(ref backend) = self.backend {
+            let text = chunk.text.clone();
+            let backend = backend.clone();
+
+            let audio = std::thread::scope(|_| {
+                tokio::runtime::Handle::try_current()
+                    .map(|handle| handle.block_on(backend.synthesize(&text)))
+                    .unwrap_or_else(|_| {
+                        Err(PipelineError::Tts("No tokio runtime available".to_string()))
+                    })
+            })?;
+
+            return Ok(audio);
+        }
+
         // Return silence of appropriate length (22050 samples per second)
         let duration_samples = chunk.text.len() * 2000; // ~50ms per char
         Ok(vec![0.0f32; duration_samples])
@@ -324,6 +451,54 @@ impl TtsBackend for StreamingTts {
     }
 }
 
+// ============================================================================
+// P0-1 FIX: Helper functions
+// ============================================================================
+
+/// Load reference audio from a WAV file
+///
+/// Returns the audio samples as f32 normalized to [-1.0, 1.0]
+fn load_reference_audio(path: &std::path::Path) -> Result<Vec<f32>, PipelineError> {
+    use hound::WavReader;
+
+    let reader = WavReader::open(path)
+        .map_err(|e| PipelineError::Audio(format!("Failed to open reference audio: {}", e)))?;
+
+    let spec = reader.spec();
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => reader
+            .into_samples::<f32>()
+            .filter_map(Result::ok)
+            .collect(),
+        hound::SampleFormat::Int => {
+            let max_val = (1 << (spec.bits_per_sample - 1)) as f32;
+            reader
+                .into_samples::<i32>()
+                .filter_map(Result::ok)
+                .map(|s| s as f32 / max_val)
+                .collect()
+        }
+    };
+
+    // If stereo, convert to mono by averaging channels
+    let samples = if spec.channels == 2 {
+        samples
+            .chunks(2)
+            .map(|chunk| (chunk[0] + chunk.get(1).copied().unwrap_or(0.0)) / 2.0)
+            .collect()
+    } else {
+        samples
+    };
+
+    tracing::debug!(
+        "Loaded reference audio: {} samples at {} Hz",
+        samples.len(),
+        spec.sample_rate
+    );
+
+    Ok(samples)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,6 +508,14 @@ mod tests {
         let config = TtsConfig::default();
         assert_eq!(config.engine, TtsEngine::Piper);
         assert_eq!(config.speaking_rate, 1.0);
+    }
+
+    #[test]
+    fn test_tts_config_indicf5() {
+        let config = TtsConfig::indicf5("/path/to/model");
+        assert_eq!(config.engine, TtsEngine::IndicF5);
+        assert_eq!(config.sample_rate, 24000);
+        assert!(config.model_path.is_some());
     }
 
     #[test]
