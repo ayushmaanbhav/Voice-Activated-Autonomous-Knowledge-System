@@ -383,7 +383,7 @@ mod tests {
 
         let result = SearchResult {
             id: "test-1".to_string(),
-            text: "Test document".to_string(),
+            content: "Test document".to_string(),
             score: 0.85,
             metadata: [("category".to_string(), "test".to_string())]
                 .into_iter()

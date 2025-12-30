@@ -782,7 +782,7 @@ mod tests {
     fn create_test_result(id: &str, score: f32) -> SearchResult {
         SearchResult {
             id: id.to_string(),
-            text: format!("Test document {}", id),
+            content: format!("Test document {}", id),
             score,
             metadata: std::collections::HashMap::new(),
             source: crate::retriever::SearchSource::Dense,

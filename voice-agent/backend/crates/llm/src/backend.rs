@@ -979,6 +979,8 @@ mod tests {
         let msg = Message {
             role: Role::User,
             content: "Hello".to_string(),
+            name: None,
+            tool_call_id: None,
         };
         let ollama_msg: OllamaMessage = (&msg).into();
         assert_eq!(ollama_msg.role, "user");

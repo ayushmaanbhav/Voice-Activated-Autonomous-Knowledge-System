@@ -307,7 +307,7 @@ mod tests {
         let docs = vec![
             Document {
                 id: "1".to_string(),
-                text: "Gold loan interest rate is 10% per annum".to_string(),
+                content: "Gold loan interest rate is 10% per annum".to_string(),
                 title: Some("Interest Rates".to_string()),
                 category: Some("product".to_string()),
                 language: Some("en".to_string()),
@@ -315,7 +315,7 @@ mod tests {
             },
             Document {
                 id: "2".to_string(),
-                text: "Apply for gold loan online easily".to_string(),
+                content: "Apply for gold loan online easily".to_string(),
                 title: Some("Application".to_string()),
                 category: Some("process".to_string()),
                 language: Some("en".to_string()),

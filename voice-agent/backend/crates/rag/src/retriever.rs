@@ -515,7 +515,7 @@ mod tests {
         let dense = vec![
             SearchResult {
                 id: "1".to_string(),
-                text: "doc1".to_string(),
+                content: "doc1".to_string(),
                 score: 0.9,
                 metadata: HashMap::new(),
                 source: SearchSource::Dense,
@@ -523,7 +523,7 @@ mod tests {
             },
             SearchResult {
                 id: "2".to_string(),
-                text: "doc2".to_string(),
+                content: "doc2".to_string(),
                 score: 0.8,
                 metadata: HashMap::new(),
                 source: SearchSource::Dense,
@@ -534,7 +534,7 @@ mod tests {
         let sparse = vec![
             SearchResult {
                 id: "2".to_string(),
-                text: "doc2".to_string(),
+                content: "doc2".to_string(),
                 score: 0.85,
                 metadata: HashMap::new(),
                 source: SearchSource::Sparse,
@@ -542,7 +542,7 @@ mod tests {
             },
             SearchResult {
                 id: "3".to_string(),
-                text: "doc3".to_string(),
+                content: "doc3".to_string(),
                 score: 0.7,
                 metadata: HashMap::new(),
                 source: SearchSource::Sparse,
