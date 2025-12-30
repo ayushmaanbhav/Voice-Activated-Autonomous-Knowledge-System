@@ -51,7 +51,10 @@ pub use retriever::{
     Retriever,
 };
 pub use speech::{AudioProcessor, VADConfig, VADEvent, VADState, VoiceActivityDetector};
-pub use text_processing::{ComplianceChecker, GrammarCorrector, PIIRedactor, Translator};
+pub use text_processing::{
+    ComplianceChecker, GrammarCorrector, PIIRedactor, TextProcessor, TextProcessorResult,
+    Translator,
+};
 // P0 FIX: Export ConversationFSM trait and types
 pub use fsm::{
     ConversationEvent, ConversationFSM, ConversationOutcome, FSMAction, FSMCheckpoint, FSMError,

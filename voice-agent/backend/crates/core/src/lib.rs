@@ -83,6 +83,9 @@ pub use traits::{
     // Speech
     SpeechToText,
     TextToSpeech,
+    // P0 FIX: TextProcessor trait for pipeline integration
+    TextProcessor,
+    TextProcessorResult,
     TransitionRecord,
     Translator,
     VADConfig,

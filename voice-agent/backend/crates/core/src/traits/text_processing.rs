@@ -215,6 +215,69 @@ pub trait ComplianceChecker: Send + Sync + 'static {
     }
 }
 
+/// P0 FIX: Unified text processor trait for pipeline integration
+///
+/// This trait allows the voice pipeline to apply text processing
+/// (grammar correction, PII redaction, compliance checking) to
+/// transcripts before sending them to the LLM.
+///
+/// Implementations:
+/// - `TextProcessingPipeline` in voice-agent-text-processing crate
+///
+/// # Example
+///
+/// ```ignore
+/// let processor: Arc<dyn TextProcessor> = create_text_processor();
+/// let pipeline = VoicePipeline::simple(config)?
+///     .with_text_processor(processor);
+///
+/// // Now transcripts are automatically processed before LLM
+/// ```
+#[async_trait]
+pub trait TextProcessor: Send + Sync + 'static {
+    /// Process text through the full pipeline (grammar, PII, compliance)
+    ///
+    /// # Arguments
+    /// * `text` - Raw text from STT
+    ///
+    /// # Returns
+    /// Processed text ready for LLM, or error if processing fails
+    async fn process(&self, text: &str) -> Result<TextProcessorResult>;
+
+    /// Process only PII (faster path when grammar/compliance not needed)
+    async fn process_pii_only(&self, text: &str) -> Result<String>;
+
+    /// Check if processor is enabled
+    fn is_enabled(&self) -> bool {
+        true
+    }
+}
+
+/// Result from text processing
+#[derive(Debug, Clone)]
+pub struct TextProcessorResult {
+    /// Original input text
+    pub original: String,
+    /// Processed output text (use this for LLM)
+    pub processed: String,
+    /// Whether PII was detected and redacted
+    pub pii_detected: bool,
+    /// Whether compliance issues were found and fixed
+    pub compliance_fixed: bool,
+}
+
+impl TextProcessorResult {
+    /// Create a new result with just processed text (no PII/compliance changes)
+    pub fn passthrough(text: String) -> Self {
+        Self {
+            original: text.clone(),
+            processed: text,
+            pii_detected: false,
+            compliance_fixed: false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

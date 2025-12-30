@@ -337,11 +337,9 @@ impl ConversationFSM for StageManagerAdapter {
             .clone();
         drop(checkpoints);
 
-        // Restore stage
+        // Restore stage (bypass validation since we're restoring to a known state)
         let agent_stage = Self::to_agent_stage(checkpoint.stage);
-        self.inner
-            .transition(agent_stage, TransitionReason::Manual)
-            .map_err(FSMError::RestoreFailed)?;
+        self.inner.set_stage(agent_stage);
 
         // Restore context and turn count
         *self.context.write() = checkpoint.context;

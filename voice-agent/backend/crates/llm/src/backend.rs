@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+// P1 FIX: Use centralized constants
+use voice_agent_config::constants::endpoints;
 
 use crate::prompt::Message;
 use crate::LlmError;
@@ -55,7 +57,7 @@ impl Default for LlmConfig {
     fn default() -> Self {
         Self {
             model: "qwen3:4b-instruct-2507-q4_K_M".to_string(),
-            endpoint: "http://localhost:11434".to_string(),
+            endpoint: endpoints::OLLAMA_DEFAULT.to_string(), // P1 FIX: Use centralized constant
             api_key: None,
             max_tokens: 256,
             temperature: 0.7,

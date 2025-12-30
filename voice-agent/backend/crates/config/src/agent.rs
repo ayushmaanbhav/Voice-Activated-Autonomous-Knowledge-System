@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::constants::endpoints;
 use crate::settings::RagConfig;
 
 /// Agent configuration
@@ -178,7 +179,7 @@ fn default_slm_model() -> String {
     "qwen2.5:1.5b-instruct-q4_K_M".to_string()
 }
 fn default_llm_endpoint() -> String {
-    "http://localhost:11434".to_string()
+    endpoints::OLLAMA_DEFAULT.to_string()
 }
 fn default_max_tokens() -> usize {
     256

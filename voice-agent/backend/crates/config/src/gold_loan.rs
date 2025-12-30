@@ -113,17 +113,20 @@ pub struct CompetitorRates {
     pub other_nbfc: f64,
 }
 
-// Default values
+// P1 FIX: Use centralized constants
+use crate::constants::{gold_prices, interest_rates, loan_tiers, ltv};
+
+// Default values - now using centralized constants
 fn default_gold_price() -> f64 {
-    7500.0 // INR per gram (updated for 2024 prices)
+    gold_prices::DEFAULT_24K_PER_GRAM
 }
 
 fn default_kotak_rate() -> f64 {
-    10.5 // %
+    interest_rates::DEFAULT_HEADLINE
 }
 
 fn default_ltv() -> f64 {
-    75.0 // %
+    ltv::MAX_LTV_PERCENT
 }
 
 fn default_min_loan() -> f64 {
@@ -147,11 +150,11 @@ fn default_24k_factor() -> f64 {
 }
 
 fn default_22k_factor() -> f64 {
-    0.916
+    gold_prices::PURITY_22K
 }
 
 fn default_18k_factor() -> f64 {
-    0.75
+    gold_prices::PURITY_18K
 }
 
 fn default_14k_factor() -> f64 {
@@ -174,25 +177,25 @@ fn default_other_nbfc_rate() -> f64 {
     20.0
 }
 
-// P2 FIX: Tiered rate defaults
+// P2 FIX: Tiered rate defaults - now using centralized constants
 fn default_tier1_rate() -> f64 {
-    11.5 // Standard rate for small loans
+    interest_rates::TIER_1_STANDARD
 }
 
 fn default_tier1_threshold() -> f64 {
-    100000.0 // Up to 1 lakh
+    loan_tiers::TIER_1_MAX
 }
 
 fn default_tier2_rate() -> f64 {
-    10.5 // Better rate for medium loans
+    interest_rates::TIER_2_HEADLINE
 }
 
 fn default_tier2_threshold() -> f64 {
-    500000.0 // 1-5 lakh
+    loan_tiers::TIER_2_MAX
 }
 
 fn default_tier3_rate() -> f64 {
-    9.5 // Premium rate for high-value loans
+    interest_rates::TIER_3_PREMIUM
 }
 
 impl Default for GoldLoanConfig {

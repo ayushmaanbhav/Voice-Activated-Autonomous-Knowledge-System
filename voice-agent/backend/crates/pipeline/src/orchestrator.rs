@@ -21,8 +21,8 @@ use crate::turn_detection::{HybridTurnDetector, TurnDetectionConfig, TurnDetecti
 use crate::vad::{VadConfig, VadState, VoiceActivityDetector};
 use crate::PipelineError;
 use voice_agent_core::{
-    AudioFrame, ControlFrame, Frame, GenerateRequest, Language, LanguageModel, ProcessorContext,
-    TranscriptResult,
+    AudioFrame, AudioProcessor, ControlFrame, Frame, GenerateRequest, Language, LanguageModel,
+    ProcessorContext, TextProcessor, TranscriptResult,
 };
 
 // P1 FIX: Import processors for streaming LLM → TTS pipeline
@@ -218,6 +218,10 @@ pub struct VoicePipeline {
     llm: Option<Arc<dyn LanguageModel>>,
     /// P0-3 FIX: Pending transcript waiting for LLM processing
     pending_transcript: Mutex<Option<TranscriptResult>>,
+    /// P0 FIX: Text processor for grammar, PII, compliance before LLM
+    text_processor: Option<Arc<dyn TextProcessor>>,
+    /// P2 FIX: Noise suppressor for cleaning audio before VAD/STT
+    noise_suppressor: Option<Arc<dyn AudioProcessor>>,
 }
 
 impl VoicePipeline {
@@ -250,6 +254,8 @@ impl VoicePipeline {
             processor_chain,
             llm: None, // P0-3 FIX: LLM not set by default, use with_llm()
             pending_transcript: Mutex::new(None),
+            text_processor: None, // P0 FIX: Not set by default, use with_text_processor()
+            noise_suppressor: None, // P2 FIX: Not set by default, use with_noise_suppressor()
         })
     }
 
@@ -272,6 +278,49 @@ impl VoicePipeline {
     /// P0-3 FIX: Check if LLM is configured
     pub fn has_llm(&self) -> bool {
         self.llm.is_some()
+    }
+
+    /// P0 FIX: Set the text processor for pre-LLM processing
+    ///
+    /// When set, transcripts are processed through grammar correction,
+    /// PII redaction, and compliance checking before being sent to the LLM.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let text_processor = Arc::new(TextProcessingPipeline::new(config, None));
+    /// let pipeline = VoicePipeline::simple(config)?
+    ///     .with_text_processor(text_processor);
+    /// ```
+    pub fn with_text_processor(mut self, tp: Arc<dyn TextProcessor>) -> Self {
+        self.text_processor = Some(tp);
+        self
+    }
+
+    /// P0 FIX: Check if text processor is configured
+    pub fn has_text_processor(&self) -> bool {
+        self.text_processor.is_some()
+    }
+
+    /// P2 FIX: Set the noise suppressor for audio preprocessing
+    ///
+    /// When set, audio frames are processed through noise suppression
+    /// before being sent to VAD and STT, improving accuracy in noisy environments.
+    ///
+    /// # Example
+    /// ```ignore
+    /// use voice_agent_pipeline::create_noise_suppressor;
+    /// let ns = Arc::new(create_noise_suppressor(16000));
+    /// let pipeline = VoicePipeline::simple(config)?
+    ///     .with_noise_suppressor(ns);
+    /// ```
+    pub fn with_noise_suppressor(mut self, ns: Arc<dyn AudioProcessor>) -> Self {
+        self.noise_suppressor = Some(ns);
+        self
+    }
+
+    /// P2 FIX: Check if noise suppressor is configured
+    pub fn has_noise_suppressor(&self) -> bool {
+        self.noise_suppressor.is_some()
     }
 
     /// P0-3 FIX: Handle a final transcript by calling LLM and streaming to TTS
@@ -299,9 +348,37 @@ impl VoicePipeline {
             "Processing final transcript through LLM"
         );
 
-        // Build the LLM request
+        // P0 FIX: Apply text processing (grammar, PII redaction, compliance) before LLM
+        let processed_text = if let Some(tp) = &self.text_processor {
+            match tp.process(&transcript.text).await {
+                Ok(result) => {
+                    if result.pii_detected {
+                        tracing::info!("PII detected and redacted from transcript");
+                    }
+                    if result.compliance_fixed {
+                        tracing::info!("Compliance issues fixed in transcript");
+                    }
+                    if result.processed != result.original {
+                        tracing::debug!(
+                            original = %result.original,
+                            processed = %result.processed,
+                            "Transcript processed"
+                        );
+                    }
+                    result.processed
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Text processing failed, using raw transcript");
+                    transcript.text.clone()
+                }
+            }
+        } else {
+            transcript.text.clone()
+        };
+
+        // Build the LLM request with processed text
         let request = GenerateRequest::new(&self.config.llm.system_prompt)
-            .with_user_message(&transcript.text)
+            .with_user_message(&processed_text)
             .with_temperature(self.config.llm.temperature)
             .with_max_tokens(self.config.llm.max_tokens);
 
@@ -450,6 +527,14 @@ impl VoicePipeline {
     pub async fn process_audio(&self, mut frame: AudioFrame) -> Result<(), PipelineError> {
         let now = Instant::now();
         *self.last_audio_time.lock() = now;
+
+        // P2 FIX: Apply noise suppression before VAD/STT if configured
+        if let Some(ns) = &self.noise_suppressor {
+            frame = ns.process(&frame, None).await.map_err(|e| {
+                tracing::warn!(error = %e, "Noise suppression failed, using raw audio");
+                e
+            }).unwrap_or(frame);
+        }
 
         // 1. Run VAD
         let (vad_state, _vad_prob, _vad_result) = self.vad.process_frame(&mut frame)?;

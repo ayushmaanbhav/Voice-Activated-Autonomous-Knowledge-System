@@ -9,9 +9,10 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use async_trait::async_trait;
 use voice_agent_core::{
     ComplianceChecker, DomainContext, GrammarCorrector, Language, LanguageModel, PIIRedactor,
-    RedactionStrategy, Translator,
+    RedactionStrategy, TextProcessor, TextProcessorResult, Translator,
 };
 
 /// Unified text processing pipeline
@@ -198,6 +199,35 @@ impl TextProcessingPipeline {
     /// Detect language
     pub fn detect_language(&self, text: &str) -> Language {
         self.script_detector.detect(text)
+    }
+}
+
+/// P0 FIX: Implement TextProcessor trait for pipeline integration with VoicePipeline
+#[async_trait]
+impl TextProcessor for TextProcessingPipeline {
+    async fn process(&self, text: &str) -> voice_agent_core::Result<TextProcessorResult> {
+        // Use fully qualified syntax to call the inherent method, not the trait method
+        let result = TextProcessingPipeline::process(self, text)
+            .await
+            .map_err(|e| voice_agent_core::Error::TextProcessing(e.to_string()))?;
+
+        Ok(TextProcessorResult {
+            original: result.original,
+            processed: result.processed,
+            pii_detected: result.pii_detected,
+            compliance_fixed: !result.is_compliant,
+        })
+    }
+
+    async fn process_pii_only(&self, text: &str) -> voice_agent_core::Result<String> {
+        // Use fully qualified syntax to call the inherent method
+        TextProcessingPipeline::process_pii_only(self, text)
+            .await
+            .map_err(|e| voice_agent_core::Error::TextProcessing(e.to_string()))
+    }
+
+    fn is_enabled(&self) -> bool {
+        true // Pipeline is always enabled when instantiated
     }
 }
 

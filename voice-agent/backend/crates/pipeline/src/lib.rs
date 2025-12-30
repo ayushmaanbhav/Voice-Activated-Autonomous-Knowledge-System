@@ -27,6 +27,11 @@ pub use turn_detection::{
 
 // STT exports
 pub use stt::{DecoderConfig, EnhancedDecoder, StreamingStt, SttConfig, SttEngine};
+// P2 FIX: Export STT backend types and factory
+pub use stt::{
+    create_indicconformer, create_stt_backend, IndicConformerBackend, IndicConformerConfig,
+    SttBackend, StubSttBackend,
+};
 
 // TTS exports
 pub use tts::{ChunkStrategy, StreamingTts, TtsConfig, TtsEngine, TtsEvent, WordChunker};

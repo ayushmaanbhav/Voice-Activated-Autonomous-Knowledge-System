@@ -4,6 +4,8 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+// P1 FIX: Use centralized RAG constants
+use voice_agent_config::constants::rag;
 
 use crate::embeddings::{EmbeddingConfig, SimpleEmbedder};
 use crate::query_expansion::QueryExpander;
@@ -39,15 +41,16 @@ pub struct RetrieverConfig {
 
 impl Default for RetrieverConfig {
     fn default() -> Self {
+        // P1 FIX: Use centralized constants for consistency with settings.rs
         Self {
             dense_top_k: 20,
             sparse_top_k: 20,
-            final_top_k: 5,
-            dense_weight: 0.6,
+            final_top_k: rag::DEFAULT_TOP_K,
+            dense_weight: rag::DENSE_WEIGHT as f32,
             rrf_k: 60.0,
-            min_score: 0.3,
+            min_score: rag::MIN_SCORE as f32,
             reranking_enabled: true,
-            prefetch_confidence_threshold: 0.7,
+            prefetch_confidence_threshold: rag::PREFETCH_CONFIDENCE_THRESHOLD as f32,
             prefetch_top_k: 3,
             // P1 FIX: Enable query expansion by default for Hindi/Hinglish
             query_expansion_enabled: true,

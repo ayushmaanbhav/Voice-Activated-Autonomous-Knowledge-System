@@ -4,6 +4,7 @@
 
 pub mod auth;
 pub mod http;
+pub mod mcp_server; // P2 FIX: MCP JSON-RPC endpoint
 pub mod metrics;
 pub mod rate_limit;
 pub mod session;

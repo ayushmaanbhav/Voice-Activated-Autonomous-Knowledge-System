@@ -7,9 +7,17 @@
 //! - GRU for temporal modeling
 //! - Stateful for streaming
 
+use async_trait::async_trait;
+use futures::Stream;
 use parking_lot::Mutex;
 use std::path::Path;
+use std::pin::Pin;
 use voice_agent_core::AudioFrame;
+// P0 FIX: Import core VAD trait with alias to avoid naming collision
+use voice_agent_core::traits::{
+    VADConfig as CoreVADConfig, VADEvent as CoreVADEvent, VADState as CoreVADState,
+    VoiceActivityDetector as CoreVadTrait,
+};
 
 use crate::PipelineError;
 
@@ -496,6 +504,106 @@ fn create_mel_filterbank(
     }
 
     Ok(filterbank)
+}
+
+// =============================================================================
+// P0 FIX: Implement core VoiceActivityDetector trait for polymorphic usage
+// =============================================================================
+
+/// Map local VadState to core VADState
+impl From<VadState> for CoreVADState {
+    fn from(state: VadState) -> Self {
+        match state {
+            VadState::Silence => CoreVADState::Idle,
+            VadState::SpeechStart => CoreVADState::PendingSpeech,
+            VadState::Speech => CoreVADState::InSpeech,
+            VadState::SpeechEnd => CoreVADState::PendingSilence,
+        }
+    }
+}
+
+#[async_trait]
+impl CoreVadTrait for VoiceActivityDetector {
+    async fn detect(&self, audio: &AudioFrame, sensitivity: f32) -> bool {
+        // Clone frame since process_frame takes &mut
+        let mut frame = audio.clone();
+        match self.process_frame(&mut frame) {
+            Ok((_, prob, _)) => prob >= sensitivity,
+            Err(_) => false,
+        }
+    }
+
+    async fn speech_probability(&self, audio: &AudioFrame) -> f32 {
+        let mut frame = audio.clone();
+        match self.process_frame(&mut frame) {
+            Ok((_, prob, _)) => prob,
+            Err(_) => 0.0,
+        }
+    }
+
+    fn process_stream<'a>(
+        &'a self,
+        audio_stream: Pin<Box<dyn Stream<Item = AudioFrame> + Send + 'a>>,
+        _config: &'a CoreVADConfig,
+    ) -> Pin<Box<dyn Stream<Item = CoreVADEvent> + Send + 'a>> {
+        use futures::StreamExt;
+
+        // Transform audio frames to VAD events
+        let vad_stream = audio_stream.map(move |frame| {
+            let mut frame = frame;
+            match self.process_frame(&mut frame) {
+                Ok((state, prob, result)) => {
+                    // Map VadResult to CoreVADEvent
+                    match result {
+                        VadResult::SpeechConfirmed => CoreVADEvent::SpeechStart,
+                        VadResult::SpeechContinue => CoreVADEvent::SpeechContinue { probability: prob },
+                        VadResult::SpeechEnd => CoreVADEvent::SpeechEnd,
+                        VadResult::Silence | VadResult::PotentialSpeechStart | VadResult::PotentialSpeechEnd => {
+                            // During pending states, report based on current state
+                            match state {
+                                VadState::Speech | VadState::SpeechEnd => {
+                                    CoreVADEvent::SpeechContinue { probability: prob }
+                                }
+                                _ => CoreVADEvent::Silence,
+                            }
+                        }
+                    }
+                }
+                Err(_) => CoreVADEvent::Silence,
+            }
+        });
+
+        Box::pin(vad_stream)
+    }
+
+    fn reset(&self) {
+        // Call existing reset method
+        VoiceActivityDetector::reset(self);
+    }
+
+    fn current_state(&self) -> CoreVADState {
+        self.state().into()
+    }
+
+    fn model_info(&self) -> &str {
+        "MagicNet VAD (10ms frame, GRU-based)"
+    }
+
+    fn is_neural(&self) -> bool {
+        #[cfg(feature = "onnx")]
+        {
+            true
+        }
+        #[cfg(not(feature = "onnx"))]
+        {
+            false // Energy-based fallback
+        }
+    }
+
+    fn recommended_frame_size(&self) -> usize {
+        // 10ms at 16kHz = 160 samples
+        (self.config.sample_rate as usize * self.config.frame_ms as usize) / 1000
+    }
 }
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::auth::auth_middleware;
+use crate::mcp_server::handle_mcp_request; // P2 FIX: MCP JSON-RPC endpoint
 use crate::metrics::metrics_handler;
 use crate::state::AppState;
 use crate::webrtc; // P2 FIX: WebRTC signaling
@@ -40,6 +41,8 @@ pub fn create_router(state: AppState) -> Router {
         // Tool endpoints
         .route("/api/tools", get(list_tools))
         .route("/api/tools/:name", post(call_tool))
+        // P2 FIX: MCP JSON-RPC endpoint for external MCP clients
+        .route("/mcp", post(handle_mcp_request))
         // Health check
         .route("/health", get(health_check))
         .route("/ready", get(readiness_check))

@@ -12,6 +12,8 @@ use qdrant_client::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+// P1 FIX: Use centralized constants
+use voice_agent_config::constants::endpoints;
 
 use crate::RagError;
 
@@ -33,7 +35,7 @@ pub struct VectorStoreConfig {
 impl Default for VectorStoreConfig {
     fn default() -> Self {
         Self {
-            endpoint: "http://localhost:6333".to_string(),
+            endpoint: endpoints::QDRANT_DEFAULT.to_string(), // P1 FIX: Use centralized constant
             collection: "gold_loan_knowledge".to_string(),
             vector_dim: 384,
             distance: VectorDistance::Cosine,

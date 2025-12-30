@@ -16,6 +16,7 @@
 //! ```
 
 use std::sync::Arc;
+use voice_agent_config::constants::endpoints;
 use voice_agent_core::{llm_types::ToolDefinition, LanguageModel};
 
 use crate::{
@@ -106,7 +107,7 @@ impl LlmProviderConfig {
         Self {
             provider: LlmProvider::Ollama,
             api_key: None,
-            endpoint: Some("http://localhost:11434".to_string()),
+            endpoint: Some(endpoints::OLLAMA_DEFAULT.to_string()),
             model: model.into(),
             ..Default::default()
         }
@@ -202,7 +203,7 @@ impl LlmFactory {
                 let endpoint = config
                     .endpoint
                     .clone()
-                    .unwrap_or_else(|| "http://localhost:11434".to_string());
+                    .unwrap_or_else(|| endpoints::OLLAMA_DEFAULT.to_string());
 
                 let ollama_config = LlmConfig {
                     model: config.model.clone(),
@@ -278,7 +279,7 @@ impl LlmFactory {
                 let endpoint = config
                     .endpoint
                     .clone()
-                    .unwrap_or_else(|| "http://localhost:11434".to_string());
+                    .unwrap_or_else(|| endpoints::OLLAMA_DEFAULT.to_string());
 
                 let ollama_config = LlmConfig {
                     model: config.model.clone(),

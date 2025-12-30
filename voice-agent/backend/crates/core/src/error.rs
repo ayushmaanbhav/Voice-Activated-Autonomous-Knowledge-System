@@ -36,6 +36,10 @@ pub enum Error {
     #[error("RAG error: {0}")]
     Rag(String),
 
+    // P0 FIX: Text processing errors
+    #[error("Text processing error: {0}")]
+    TextProcessing(String),
+
     // Configuration errors
     #[error("Configuration error: {0}")]
     Config(String),

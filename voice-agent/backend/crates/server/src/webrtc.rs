@@ -27,7 +27,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 use voice_agent_core::{AudioFrame, Channels, SampleRate};
-use voice_agent_pipeline::{PipelineConfig, PipelineEvent, VoicePipeline};
+use voice_agent_pipeline::{create_noise_suppressor, PipelineConfig, PipelineEvent, VoicePipeline};
 use voice_agent_transport::{
     IceCandidate, IceServer, Transport, TransportEvent, WebRtcConfig, WebRtcTransport,
 };
@@ -174,9 +174,16 @@ pub async fn handle_offer(
     })?;
 
     // P1 FIX: Create voice pipeline for WebRTC audio processing
+    // P0 FIX: Wire text processing (grammar, PII, compliance) to pipeline
+    // P2 FIX: Wire noise suppression for cleaner audio input
+    let noise_suppressor: Arc<dyn voice_agent_core::AudioProcessor> =
+        Arc::from(create_noise_suppressor(16000)); // 16kHz input
     let pipeline = match VoicePipeline::simple(PipelineConfig::default()) {
         Ok(p) => {
-            tracing::info!("Created voice pipeline for WebRTC session {}", session_id);
+            let p = p
+                .with_text_processor(state.text_processing.clone())
+                .with_noise_suppressor(noise_suppressor);
+            tracing::info!("Created voice pipeline with text processing and noise suppression for WebRTC session {}", session_id);
             Some(Arc::new(Mutex::new(p)))
         },
         Err(e) => {

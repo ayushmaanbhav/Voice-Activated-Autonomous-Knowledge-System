@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use voice_agent_core::{AudioFrame, Channels, Frame, SampleRate};
-use voice_agent_pipeline::{PipelineConfig, PipelineEvent, VoicePipeline};
+use voice_agent_pipeline::{create_noise_suppressor, PipelineConfig, PipelineEvent, VoicePipeline};
 
 use crate::rate_limit::RateLimiter;
 use crate::session::Session;
@@ -136,8 +136,17 @@ impl WebSocketHandler {
         let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<u8>>(100);
 
         // Create voice pipeline for audio processing
+        // P0 FIX: Wire text processing (grammar, PII, compliance) to pipeline
+        // P2 FIX: Wire noise suppression for cleaner audio input
+        let noise_suppressor: Arc<dyn voice_agent_core::AudioProcessor> =
+            Arc::from(create_noise_suppressor(16000)); // 16kHz input
         let pipeline = match VoicePipeline::simple(PipelineConfig::default()) {
-            Ok(p) => Some(Arc::new(tokio::sync::Mutex::new(p))),
+            Ok(p) => {
+                let p = p
+                    .with_text_processor(text_processing.clone())
+                    .with_noise_suppressor(noise_suppressor);
+                Some(Arc::new(tokio::sync::Mutex::new(p)))
+            },
             Err(e) => {
                 tracing::warn!(
                     "Failed to create voice pipeline: {}, using text-only mode",

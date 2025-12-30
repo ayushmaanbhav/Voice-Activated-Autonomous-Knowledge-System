@@ -4,6 +4,7 @@ use config::{Config, Environment, File};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+use crate::constants::{endpoints, rag};
 use crate::{AgentConfig, ConfigError, GoldLoanConfig, PipelineConfig};
 
 /// P1 FIX: Runtime environment enum
@@ -665,9 +666,9 @@ pub struct RagConfig {
     pub prefetch_top_k: usize,
 }
 
-// RAG default value functions
+// RAG default value functions - P1 FIX: Use centralized constants
 fn default_qdrant_endpoint() -> String {
-    "http://localhost:6333".to_string()
+    endpoints::QDRANT_DEFAULT.to_string()
 }
 fn default_qdrant_collection() -> String {
     "gold_loan_knowledge".to_string()
@@ -685,14 +686,14 @@ fn default_final_top_k() -> usize {
     5
 }
 fn default_dense_weight() -> f32 {
-    0.7
-} // P5: Increased for semantic queries
+    rag::DENSE_WEIGHT as f32
+} // P1 FIX: Use centralized constant
 fn default_rrf_k() -> f32 {
     60.0
 }
 fn default_min_score() -> f32 {
-    0.4
-} // P5: Increased for domain-specific queries
+    rag::MIN_SCORE as f32
+} // P1 FIX: Use centralized constant
 fn default_prefilter_threshold() -> f32 {
     0.15
 } // P5: Tuned for gold loan domain

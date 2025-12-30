@@ -481,6 +481,24 @@ impl StageManager {
         Ok(transition)
     }
 
+    /// Force set stage without validation (for restore/checkpoint operations)
+    ///
+    /// Unlike `transition()`, this method bypasses the valid_transitions check.
+    /// Use with caution - only for checkpoint restore or testing.
+    pub fn set_stage(&self, stage: ConversationStage) {
+        let from = self.current();
+        *self.current_stage.lock() = stage;
+
+        // Record the transition for history
+        let transition = StageTransition {
+            from,
+            to: stage,
+            reason: TransitionReason::Manual,
+            confidence: 1.0,
+        };
+        self.stage_history.lock().push(transition);
+    }
+
     /// Suggest next stage based on current state
     pub fn suggest_next(&self) -> Option<ConversationStage> {
         let current = self.current();
