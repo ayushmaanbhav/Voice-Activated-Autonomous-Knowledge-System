@@ -556,19 +556,23 @@ impl CoreVadTrait for VoiceActivityDetector {
                     // Map VadResult to CoreVADEvent
                     match result {
                         VadResult::SpeechConfirmed => CoreVADEvent::SpeechStart,
-                        VadResult::SpeechContinue => CoreVADEvent::SpeechContinue { probability: prob },
+                        VadResult::SpeechContinue => {
+                            CoreVADEvent::SpeechContinue { probability: prob }
+                        },
                         VadResult::SpeechEnd => CoreVADEvent::SpeechEnd,
-                        VadResult::Silence | VadResult::PotentialSpeechStart | VadResult::PotentialSpeechEnd => {
+                        VadResult::Silence
+                        | VadResult::PotentialSpeechStart
+                        | VadResult::PotentialSpeechEnd => {
                             // During pending states, report based on current state
                             match state {
                                 VadState::Speech | VadState::SpeechEnd => {
                                     CoreVADEvent::SpeechContinue { probability: prob }
-                                }
+                                },
                                 _ => CoreVADEvent::Silence,
                             }
-                        }
+                        },
                     }
-                }
+                },
                 Err(_) => CoreVADEvent::Silence,
             }
         });

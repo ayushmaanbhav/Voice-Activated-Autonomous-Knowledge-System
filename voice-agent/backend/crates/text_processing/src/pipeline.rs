@@ -7,9 +7,9 @@ use crate::{
     translation::{self, ScriptDetector, TranslationConfig},
     Result, TextProcessingError,
 };
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use async_trait::async_trait;
 use voice_agent_core::{
     ComplianceChecker, DomainContext, GrammarCorrector, Language, LanguageModel, PIIRedactor,
     RedactionStrategy, TextProcessor, TextProcessorResult, Translator,

@@ -188,7 +188,7 @@ pub fn create_stt_backend(
 
             let backend = IndicConformerBackend::new(path, config)?;
             Ok(Arc::new(parking_lot::Mutex::new(backend)))
-        }
+        },
 
         SttEngine::Whisper => {
             // Whisper uses StreamingStt which already exists
@@ -207,7 +207,7 @@ pub fn create_stt_backend(
                     language,
                 ))))
             }
-        }
+        },
 
         SttEngine::Wav2Vec2 => {
             // TODO: Implement Wav2Vec2 backend
@@ -215,7 +215,7 @@ pub fn create_stt_backend(
             Ok(Arc::new(parking_lot::Mutex::new(StubSttBackend::new(
                 language,
             ))))
-        }
+        },
     }
 }
 

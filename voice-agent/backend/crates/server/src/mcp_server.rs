@@ -66,7 +66,10 @@ fn handle_tools_list(state: &AppState, request: &JsonRpcRequest) -> JsonRpcRespo
         .collect();
 
     JsonRpcResponse::success(
-        request.id.clone().unwrap_or(voice_agent_tools::mcp::RequestId::Number(0)),
+        request
+            .id
+            .clone()
+            .unwrap_or(voice_agent_tools::mcp::RequestId::Number(0)),
         serde_json::json!({
             "tools": tool_schemas
         }),
@@ -88,7 +91,7 @@ async fn handle_tools_call(state: &AppState, request: &JsonRpcRequest) -> JsonRp
                         data: None,
                     },
                 );
-            }
+            },
         },
         None => {
             return JsonRpcResponse::error(
@@ -99,7 +102,7 @@ async fn handle_tools_call(state: &AppState, request: &JsonRpcRequest) -> JsonRp
                     data: None,
                 },
             );
-        }
+        },
     };
 
     // Execute the tool
@@ -115,14 +118,14 @@ async fn handle_tools_call(state: &AppState, request: &JsonRpcRequest) -> JsonRp
                             "type": "text",
                             "text": text
                         })
-                    }
+                    },
                     voice_agent_tools::mcp::ContentBlock::Image { data, mime_type } => {
                         serde_json::json!({
                             "type": "image",
                             "data": data,
                             "mimeType": mime_type
                         })
-                    }
+                    },
                     voice_agent_tools::mcp::ContentBlock::Resource { uri, mime_type } => {
                         serde_json::json!({
                             "type": "resource",
@@ -131,7 +134,7 @@ async fn handle_tools_call(state: &AppState, request: &JsonRpcRequest) -> JsonRp
                                 "mimeType": mime_type
                             }
                         })
-                    }
+                    },
                     voice_agent_tools::mcp::ContentBlock::Audio {
                         data,
                         mime_type,
@@ -145,18 +148,21 @@ async fn handle_tools_call(state: &AppState, request: &JsonRpcRequest) -> JsonRp
                             "sampleRate": sample_rate,
                             "durationMs": duration_ms
                         })
-                    }
+                    },
                 })
                 .collect();
 
             JsonRpcResponse::success(
-                request.id.clone().unwrap_or(voice_agent_tools::mcp::RequestId::Number(0)),
+                request
+                    .id
+                    .clone()
+                    .unwrap_or(voice_agent_tools::mcp::RequestId::Number(0)),
                 serde_json::json!({
                     "content": content,
                     "isError": output.is_error
                 }),
             )
-        }
+        },
         Err(tool_error) => JsonRpcResponse::from_tool_error(request.id.clone(), tool_error),
     }
 }

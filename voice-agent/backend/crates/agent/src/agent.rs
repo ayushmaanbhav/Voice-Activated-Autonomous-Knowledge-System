@@ -272,7 +272,7 @@ impl GoldLoanAgent {
                     "LLM backend initialized successfully"
                 );
                 Some(llm)
-            }
+            },
             Err(e) => {
                 tracing::warn!(
                     provider = ?config.llm_provider.provider,
@@ -280,7 +280,7 @@ impl GoldLoanAgent {
                     "Failed to create LLM backend, falling back to None"
                 );
                 None
-            }
+            },
         };
 
         // P1 FIX: Create RAG retriever if enabled
@@ -343,14 +343,14 @@ impl GoldLoanAgent {
                         "Speculative executor initialized"
                     );
                     Some(Arc::new(executor))
-                }
+                },
                 Err(e) => {
                     tracing::warn!(
                         error = %e,
                         "Failed to create speculative executor, falling back to direct LLM"
                     );
                     None
-                }
+                },
             }
         } else {
             None
@@ -1571,19 +1571,17 @@ impl GoldLoanAgent {
                             "Speculative execution succeeded"
                         );
                         return Ok(result.text);
-                    }
+                    },
                     Err(e) => {
                         tracing::warn!(
                             error = %e,
                             "Speculative execution failed, falling back to direct LLM"
                         );
                         // Fall through to direct LLM path
-                    }
+                    },
                 }
             } else {
-                tracing::debug!(
-                    "Skipping speculative executor - tool calling required"
-                );
+                tracing::debug!("Skipping speculative executor - tool calling required");
             }
         }
 

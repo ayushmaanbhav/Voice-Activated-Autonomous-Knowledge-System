@@ -89,7 +89,10 @@ impl IndicF5Backend {
 
         let sample_rate = model.config().sample_rate;
 
-        tracing::info!("IndicF5 TTS backend loaded successfully (sample_rate={})", sample_rate);
+        tracing::info!(
+            "IndicF5 TTS backend loaded successfully (sample_rate={})",
+            sample_rate
+        );
 
         Ok(Self {
             model,
@@ -212,19 +215,19 @@ pub fn create_tts_backend(
                 tracing::warn!("IndicF5 requested but candle feature not enabled, using stub");
                 Ok(Arc::new(StubTtsBackend::new(24000)))
             }
-        }
+        },
 
         TtsEngine::Piper => {
             // TODO: Implement Piper ONNX backend
             // For now, fall back to stub with warning
             tracing::warn!("Piper TTS not yet implemented, using stub backend");
             Ok(Arc::new(StubTtsBackend::new(22050)))
-        }
+        },
 
         TtsEngine::ParlerTts => {
             // TODO: Implement ParlerTts ONNX backend
             tracing::warn!("ParlerTts not yet implemented, using stub backend");
             Ok(Arc::new(StubTtsBackend::new(24000)))
-        }
+        },
     }
 }

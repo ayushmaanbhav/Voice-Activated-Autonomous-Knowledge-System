@@ -54,14 +54,27 @@ pub use orchestrator::{
 
 // Processor exports
 pub use processors::{
-    InterruptHandler, InterruptHandlerConfig, InterruptMode, ProcessorChain, ProcessorChainBuilder,
-    SentenceDetector, SentenceDetectorConfig, TtsProcessor, TtsProcessorConfig,
     // P2-2 FIX: Export generic processors for extensibility
-    FilterProcessor, MapProcessor, PassthroughProcessor,
+    FilterProcessor,
+    InterruptHandler,
+    InterruptHandlerConfig,
+    InterruptMode,
+    MapProcessor,
+    PassthroughProcessor,
+    ProcessorChain,
+    ProcessorChainBuilder,
+    SentenceDetector,
+    SentenceDetectorConfig,
+    TtsProcessor,
+    TtsProcessorConfig,
 };
 
 // P3 FIX: Trait adapter exports - bridge internal STT/TTS with core traits
+#[cfg(feature = "noise-suppression")]
+pub use adapters::NoiseSuppressorProcessor;
 pub use adapters::{
+    // P2-1 FIX: Noise suppression processor
+    create_noise_suppressor,
     create_passthrough_processor,
     create_stt_adapter,
     create_tts_adapter,
@@ -69,11 +82,7 @@ pub use adapters::{
     PassthroughAudioProcessor,
     SttAdapter,
     TtsAdapter,
-    // P2-1 FIX: Noise suppression processor
-    create_noise_suppressor,
 };
-#[cfg(feature = "noise-suppression")]
-pub use adapters::NoiseSuppressorProcessor;
 
 use thiserror::Error;
 

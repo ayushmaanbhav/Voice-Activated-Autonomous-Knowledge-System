@@ -332,14 +332,17 @@ impl VoicePipeline {
     ///
     /// # Returns
     /// Ok(()) on success, or error if LLM/TTS fails
-    async fn handle_final_transcript(&self, transcript: &TranscriptResult) -> Result<(), PipelineError> {
+    async fn handle_final_transcript(
+        &self,
+        transcript: &TranscriptResult,
+    ) -> Result<(), PipelineError> {
         // Check if LLM is configured and enabled
         let llm = match &self.llm {
             Some(llm) if self.config.llm.enabled => llm.clone(),
             _ => {
                 tracing::debug!("LLM not configured or disabled, skipping auto-response");
                 return Ok(());
-            }
+            },
         };
 
         tracing::info!(
@@ -366,11 +369,11 @@ impl VoicePipeline {
                         );
                     }
                     result.processed
-                }
+                },
                 Err(e) => {
                     tracing::warn!(error = %e, "Text processing failed, using raw transcript");
                     transcript.text.clone()
-                }
+                },
             }
         } else {
             transcript.text.clone()
@@ -431,12 +434,14 @@ impl VoicePipeline {
                         tracing::warn!("TTS channel closed while streaming LLM response");
                         break;
                     }
-                }
+                },
                 Err(e) => {
                     tracing::error!(error = %e, "LLM streaming error");
-                    let _ = self.event_tx.send(PipelineEvent::Error(format!("LLM error: {}", e)));
+                    let _ = self
+                        .event_tx
+                        .send(PipelineEvent::Error(format!("LLM error: {}", e)));
                     break;
-                }
+                },
             }
         }
 
@@ -530,10 +535,14 @@ impl VoicePipeline {
 
         // P2 FIX: Apply noise suppression before VAD/STT if configured
         if let Some(ns) = &self.noise_suppressor {
-            frame = ns.process(&frame, None).await.map_err(|e| {
-                tracing::warn!(error = %e, "Noise suppression failed, using raw audio");
-                e
-            }).unwrap_or(frame);
+            frame = ns
+                .process(&frame, None)
+                .await
+                .map_err(|e| {
+                    tracing::warn!(error = %e, "Noise suppression failed, using raw audio");
+                    e
+                })
+                .unwrap_or(frame);
         }
 
         // 1. Run VAD
@@ -561,7 +570,7 @@ impl VoicePipeline {
                     *self.state.lock() = PipelineState::Listening;
                     self.stt.lock().reset();
                 }
-            }
+            },
 
             PipelineState::Listening => {
                 // Feed audio to STT
@@ -598,7 +607,7 @@ impl VoicePipeline {
                         .event_tx
                         .send(PipelineEvent::TurnStateChanged(turn_result));
                 }
-            }
+            },
 
             PipelineState::Processing => {
                 // P0-3 FIX: Auto-process pending transcript through LLM
@@ -618,15 +627,15 @@ impl VoicePipeline {
                     }
                 }
                 // Audio is still monitored for barge-in during processing
-            }
+            },
 
             PipelineState::Speaking => {
                 // Handled above in barge-in check
-            }
+            },
 
             PipelineState::Paused => {
                 // Do nothing
-            }
+            },
         }
 
         Ok(())

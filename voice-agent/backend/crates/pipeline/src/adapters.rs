@@ -436,12 +436,15 @@ impl NoiseSuppressorProcessor {
                 48000,
                 input_sample_rate as usize,
                 (input_sample_rate / 100) as usize, // Output chunk size (10ms at input rate)
-                2,                                   // Sub-chunks
-                1,                                   // Mono
+                2,                                  // Sub-chunks
+                1,                                  // Mono
             )
             .expect("Failed to create resampler from 48kHz");
 
-            (Some(parking_lot::Mutex::new(to_48k)), Some(parking_lot::Mutex::new(from_48k)))
+            (
+                Some(parking_lot::Mutex::new(to_48k)),
+                Some(parking_lot::Mutex::new(from_48k)),
+            )
         } else {
             (None, None)
         };
@@ -536,7 +539,7 @@ impl AudioProcessor for NoiseSuppressorProcessor {
                     Err(e) => {
                         tracing::warn!("Resampling error: {}", e);
                         continue;
-                    }
+                    },
                 }
             } else {
                 frame
@@ -570,7 +573,7 @@ impl AudioProcessor for NoiseSuppressorProcessor {
                     Err(e) => {
                         tracing::warn!("Resampling error: {}", e);
                         Vec::new()
-                    }
+                    },
                 }
             }
         } else {
@@ -612,9 +615,7 @@ pub fn create_noise_suppressor(sample_rate: u32) -> Box<dyn AudioProcessor> {
     #[cfg(not(feature = "noise-suppression"))]
     {
         let _ = sample_rate; // Suppress unused warning
-        tracing::warn!(
-            "noise-suppression feature not enabled, using passthrough"
-        );
+        tracing::warn!("noise-suppression feature not enabled, using passthrough");
         Box::new(PassthroughAudioProcessor::with_name("passthrough-no-ns"))
     }
 }

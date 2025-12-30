@@ -214,11 +214,8 @@ impl StreamingTts {
             None
         };
 
-        let backend = create_tts_backend(
-            config.engine,
-            config.model_path.as_deref(),
-            reference_audio,
-        )?;
+        let backend =
+            create_tts_backend(config.engine, config.model_path.as_deref(), reference_audio)?;
 
         Ok(Self::with_backend(backend, config))
     }
@@ -477,7 +474,7 @@ fn load_reference_audio(path: &std::path::Path) -> Result<Vec<f32>, PipelineErro
                 .filter_map(Result::ok)
                 .map(|s| s as f32 / max_val)
                 .collect()
-        }
+        },
     };
 
     // If stereo, convert to mono by averaging channels

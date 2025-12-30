@@ -32,9 +32,7 @@ pub use prompt::{
     gold_loan_tools, parse_tool_call, Message, ParsedToolCall, PersonaConfig, PromptBuilder, Role,
     ToolBuilder, ToolDefinition,
 };
-pub use speculative::{
-    SpeculativeConfig, SpeculativeExecutor, SpeculativeMode, SpeculativeResult,
-};
+pub use speculative::{SpeculativeConfig, SpeculativeExecutor, SpeculativeMode, SpeculativeResult};
 pub use streaming::{GenerationEvent, StreamingGenerator, TokenStream};
 
 use thiserror::Error;

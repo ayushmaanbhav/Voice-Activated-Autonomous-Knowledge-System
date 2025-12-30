@@ -82,10 +82,10 @@ pub use traits::{
     Retriever,
     // Speech
     SpeechToText,
-    TextToSpeech,
     // P0 FIX: TextProcessor trait for pipeline integration
     TextProcessor,
     TextProcessorResult,
+    TextToSpeech,
     TransitionRecord,
     Translator,
     VADConfig,
