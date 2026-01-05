@@ -232,6 +232,8 @@ export default function SimplePTT() {
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const autoSendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoSendTriggeredRef = useRef<boolean>(false);
+  const sendRecordingRef = useRef<() => Promise<void>>();
 
   // Generate stable wave bar heights for voice message preview
   const waveBarHeights = useMemo(() =>
@@ -258,16 +260,21 @@ export default function SimplePTT() {
   useEffect(() => {
     if (showDiscardOption) {
       setAutoSendCountdown(3);
+      autoSendTriggeredRef.current = false; // Reset on new recording
 
       autoSendTimerRef.current = setInterval(() => {
         setAutoSendCountdown(prev => {
           if (prev <= 1) {
-            // Auto-send when countdown reaches 0
+            // Clear interval first to prevent any race conditions
             if (autoSendTimerRef.current) {
               clearInterval(autoSendTimerRef.current);
+              autoSendTimerRef.current = null;
             }
-            // Trigger send
-            setTimeout(() => sendRecording(), 100);
+            // Trigger send only once using ref guard
+            if (!autoSendTriggeredRef.current) {
+              autoSendTriggeredRef.current = true;
+              setTimeout(() => sendRecordingRef.current?.(), 100);
+            }
             return 0;
           }
           return prev - 1;
@@ -277,6 +284,7 @@ export default function SimplePTT() {
       return () => {
         if (autoSendTimerRef.current) {
           clearInterval(autoSendTimerRef.current);
+          autoSendTimerRef.current = null;
         }
       };
     }
@@ -383,10 +391,12 @@ export default function SimplePTT() {
 
   // Discard recording
   const discardRecording = useCallback(() => {
-    // Clear auto-send timer
+    // Clear auto-send timer and reset flag
     if (autoSendTimerRef.current) {
       clearInterval(autoSendTimerRef.current);
+      autoSendTimerRef.current = null;
     }
+    autoSendTriggeredRef.current = false;
 
     audioChunksRef.current = [];
     setShowDiscardOption(false);
@@ -401,10 +411,12 @@ export default function SimplePTT() {
 
   // Send recording
   const sendRecording = useCallback(async () => {
-    // Clear auto-send timer
+    // Clear auto-send timer and reset flag
     if (autoSendTimerRef.current) {
       clearInterval(autoSendTimerRef.current);
+      autoSendTimerRef.current = null;
     }
+    autoSendTriggeredRef.current = false;
 
     setShowDiscardOption(false);
 
@@ -425,6 +437,9 @@ export default function SimplePTT() {
     // Process the audio
     await processAudio(audioBlob);
   }, [language]);
+
+  // Keep ref in sync with sendRecording callback
+  sendRecordingRef.current = sendRecording;
 
   // Process audio through backend
   const processAudio = async (audioBlob: Blob) => {
