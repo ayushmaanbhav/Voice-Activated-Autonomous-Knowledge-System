@@ -1103,12 +1103,15 @@ impl IndicConformerStt {
 
 #[async_trait::async_trait]
 impl SttBackend for IndicConformerStt {
-    fn process(&mut self, audio: &[f32]) -> Result<Option<TranscriptResult>, PipelineError> {
+    async fn process_chunk(
+        &mut self,
+        audio: &[f32],
+    ) -> Result<Option<TranscriptResult>, PipelineError> {
         IndicConformerStt::process(self, audio)
     }
 
-    fn finalize_sync(&mut self) -> TranscriptResult {
-        IndicConformerStt::finalize(self)
+    async fn finalize(&mut self) -> Result<TranscriptResult, PipelineError> {
+        Ok(IndicConformerStt::finalize(self))
     }
 
     fn reset(&mut self) {
@@ -1116,7 +1119,15 @@ impl SttBackend for IndicConformerStt {
     }
 
     fn partial(&self) -> Option<&TranscriptResult> {
-        None // Partials are returned through process()
+        None // Partials are returned through process_chunk()
+    }
+
+    fn process(&mut self, audio: &[f32]) -> Result<Option<TranscriptResult>, PipelineError> {
+        IndicConformerStt::process(self, audio)
+    }
+
+    fn finalize_sync(&mut self) -> TranscriptResult {
+        IndicConformerStt::finalize(self)
     }
 }
 

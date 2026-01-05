@@ -30,10 +30,12 @@ use voice_agent_text_processing::translation::{
 };
 
 use crate::conversation::{Conversation, ConversationConfig, ConversationEvent, EndReason};
+use crate::memory::{
+    AgenticMemory, AgenticMemoryConfig, ConversationTurn, TurnRole,
+};
+use crate::persuasion::PersuasionEngine;
 use crate::stage::{ConversationStage, RagTimingStrategy};
 use crate::AgentError;
-// P0 FIX: Import PersuasionEngine for objection handling
-use crate::persuasion::PersuasionEngine;
 
 /// Agent configuration
 #[derive(Debug, Clone)]
@@ -251,14 +253,28 @@ pub struct GoldLoanAgent {
     /// P1-2 FIX: Speculative executor for low-latency generation
     /// Uses SLM for fast drafts, LLM for verification/improvement
     speculative: Option<Arc<SpeculativeExecutor>>,
+    /// MemGPT-style agentic memory system
+    /// Provides hierarchical memory: Core (human/persona) + Recall (FIFO) + Archival (long-term)
+    agentic_memory: AgenticMemory,
 }
 
 impl GoldLoanAgent {
     /// Create a new agent
     pub fn new(session_id: impl Into<String>, config: AgentConfig) -> Self {
         let (event_tx, _) = broadcast::channel(100);
+        let session_id = session_id.into();
 
-        let conversation = Arc::new(Conversation::new(session_id, config.conversation.clone()));
+        let conversation = Arc::new(Conversation::new(&session_id, config.conversation.clone()));
+
+        // Create MemGPT-style agentic memory
+        let agentic_memory = AgenticMemory::new(AgenticMemoryConfig::default(), &session_id);
+        agentic_memory.core.set_persona_name(&config.persona.name);
+        agentic_memory.core.add_persona_goal(&format!(
+            "Represent Kotak Mahindra Bank as a Gold Loan Advisor with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
+            config.persona.warmth * 100.0,
+            config.persona.formality * 100.0,
+            config.persona.empathy * 100.0
+        ));
 
         let tools = Arc::new(voice_agent_tools::registry::create_default_registry());
 
@@ -296,6 +312,7 @@ impl GoldLoanAgent {
         // P1 FIX: Wire LLM to memory for real summarization
         if let Some(ref llm_backend) = llm {
             conversation.memory().set_llm(llm_backend.clone());
+            agentic_memory.set_llm(llm_backend.clone());
         }
 
         // P4 FIX: Initialize personalization engine and context
@@ -371,6 +388,7 @@ impl GoldLoanAgent {
             user_language,
             persuasion,
             speculative,
+            agentic_memory,
         }
     }
 
@@ -399,8 +417,19 @@ impl GoldLoanAgent {
         llm: Arc<dyn LanguageModel>,
     ) -> Self {
         let (event_tx, _) = broadcast::channel(100);
+        let session_id = session_id.into();
 
-        let conversation = Arc::new(Conversation::new(session_id, config.conversation.clone()));
+        let conversation = Arc::new(Conversation::new(&session_id, config.conversation.clone()));
+
+        // Create MemGPT-style agentic memory
+        let agentic_memory = AgenticMemory::new(AgenticMemoryConfig::default(), &session_id);
+        agentic_memory.core.set_persona_name(&config.persona.name);
+        agentic_memory.core.add_persona_goal(&format!(
+            "Represent Kotak Mahindra Bank as a Gold Loan Advisor with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
+            config.persona.warmth * 100.0,
+            config.persona.formality * 100.0,
+            config.persona.empathy * 100.0
+        ));
 
         let tools = Arc::new(voice_agent_tools::registry::create_default_registry());
 
@@ -416,6 +445,7 @@ impl GoldLoanAgent {
 
         // P1 FIX: Wire LLM to memory for real summarization
         conversation.memory().set_llm(llm.clone());
+        agentic_memory.set_llm(llm.clone());
 
         // P4 FIX: Initialize personalization engine and context
         let personalization = PersonalizationEngine::new();
@@ -459,14 +489,26 @@ impl GoldLoanAgent {
             user_language,
             persuasion,
             speculative,
+            agentic_memory,
         }
     }
 
     /// Create agent without LLM (uses mock responses)
     pub fn without_llm(session_id: impl Into<String>, config: AgentConfig) -> Self {
         let (event_tx, _) = broadcast::channel(100);
+        let session_id = session_id.into();
 
-        let conversation = Arc::new(Conversation::new(session_id, config.conversation.clone()));
+        let conversation = Arc::new(Conversation::new(&session_id, config.conversation.clone()));
+
+        // Create MemGPT-style agentic memory
+        let agentic_memory = AgenticMemory::new(AgenticMemoryConfig::default(), &session_id);
+        agentic_memory.core.set_persona_name(&config.persona.name);
+        agentic_memory.core.add_persona_goal(&format!(
+            "Represent Kotak Mahindra Bank as a Gold Loan Advisor with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
+            config.persona.warmth * 100.0,
+            config.persona.formality * 100.0,
+            config.persona.empathy * 100.0
+        ));
 
         let tools = Arc::new(voice_agent_tools::registry::create_default_registry());
 
@@ -513,6 +555,7 @@ impl GoldLoanAgent {
             user_language,
             persuasion,
             speculative: None, // P1-2 FIX: No speculative without LLM
+            agentic_memory,
         }
     }
 
@@ -782,6 +825,42 @@ impl GoldLoanAgent {
         // Add user turn and detect intent (using original input for conversation history)
         let intent = self.conversation.add_user_turn(user_input)?;
 
+        // Add to MemGPT-style agentic memory recall
+        let turn = ConversationTurn::new(TurnRole::User, user_input)
+            .with_intents(vec![intent.intent.clone()])
+            .with_entities(
+                intent
+                    .slots
+                    .iter()
+                    .filter_map(|(k, v)| v.value.as_ref().map(|val| (k.clone(), val.clone())))
+                    .collect(),
+            )
+            .with_stage(self.conversation.stage().display_name());
+        self.agentic_memory.add_turn(turn);
+
+        // Extract and store customer facts from intent slots in core memory
+        for (key, slot) in &intent.slots {
+            if let Some(ref value) = slot.value {
+                let fact_key = match key.as_str() {
+                    "gold_weight" | "weight" => Some("gold_weight"),
+                    "gold_purity" | "purity" | "karat" => Some("gold_purity"),
+                    "loan_amount" | "amount" => Some("loan_amount"),
+                    "current_lender" | "lender" => Some("current_lender"),
+                    "interest_rate" | "rate" => Some("current_interest_rate"),
+                    "city" | "location" => Some("city"),
+                    "customer_name" | "name" => {
+                        self.set_customer_name(value);
+                        None
+                    }
+                    "phone_number" | "phone" | "mobile" => Some("phone"),
+                    _ => None,
+                };
+                if let Some(k) = fact_key {
+                    let _ = self.agentic_memory.core_memory_append(k, value);
+                }
+            }
+        }
+
         // P4 FIX: Process input through personalization engine
         // This detects behavior signals, objections, and updates context
         {
@@ -849,6 +928,11 @@ impl GoldLoanAgent {
         // Add assistant turn (store the translated response in conversation history)
         self.conversation.add_assistant_turn(&response)?;
 
+        // Add to MemGPT-style agentic memory recall
+        let assistant_turn = ConversationTurn::new(TurnRole::Assistant, &response)
+            .with_stage(self.conversation.stage().display_name());
+        self.agentic_memory.add_turn(assistant_turn);
+
         // P1 FIX: Trigger memory summarization in background (non-blocking)
         // This uses the LLM (if available) to summarize conversation history
         let memory = self.conversation.memory_arc();
@@ -866,6 +950,17 @@ impl GoldLoanAgent {
                 tracing::info!("Memory high watermark exceeded, triggering cleanup");
                 memory.cleanup_to_watermark();
             }
+        }
+
+        // Check agentic memory compaction (MemGPT-style)
+        if self.agentic_memory.needs_compaction() {
+            let stats = self.agentic_memory.get_stats();
+            tracing::debug!(
+                core_tokens = stats.core_tokens,
+                fifo_tokens = stats.fifo_tokens,
+                archival_count = stats.archival_count,
+                "Agentic memory high watermark exceeded"
+            );
         }
 
         // Emit response event

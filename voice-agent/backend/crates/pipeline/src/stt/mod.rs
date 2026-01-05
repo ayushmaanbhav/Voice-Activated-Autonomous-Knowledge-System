@@ -42,6 +42,20 @@ pub trait SttBackend: Send + Sync {
 
     /// Get current partial transcript
     fn partial(&self) -> Option<&TranscriptResult>;
+
+    /// Synchronous process for use in non-async contexts
+    /// Default implementation panics - override for sync backends
+    fn process(&mut self, _audio: &[f32]) -> Result<Option<TranscriptResult>, PipelineError> {
+        Err(PipelineError::Stt(
+            "Sync process not implemented for this backend".to_string(),
+        ))
+    }
+
+    /// Synchronous finalize for use in non-async contexts
+    /// Default implementation returns empty transcript - override for sync backends
+    fn finalize_sync(&mut self) -> TranscriptResult {
+        TranscriptResult::default()
+    }
 }
 
 // ============================================================================

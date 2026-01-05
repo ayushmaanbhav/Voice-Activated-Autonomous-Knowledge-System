@@ -15,6 +15,8 @@
 pub mod agent;
 pub mod conversation;
 pub mod memory;
+// Legacy memory module for backward compatibility
+pub mod memory_legacy;
 pub mod stage;
 pub mod voice_session;
 // P2 FIX: Persuasion engine for objection handling
@@ -34,7 +36,8 @@ pub mod intent {
 }
 
 pub use conversation::{Conversation, ConversationConfig, ConversationEvent};
-pub use memory::{ConversationMemory, MemoryConfig, MemoryEntry};
+pub use memory::MemoryConfig;
+pub use memory_legacy::{ConversationMemory, MemoryEntry};
 pub use stage::{
     ConversationStage, RagTimingStrategy, StageManager, StageTransition, TransitionReason,
 };

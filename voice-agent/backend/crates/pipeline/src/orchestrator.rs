@@ -15,12 +15,10 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::stt::{IndicConformerConfig, IndicConformerStt, StreamingStt, SttBackend, SttConfig};
+use crate::stt::{StreamingStt, SttBackend, SttConfig};
 use crate::tts::{StreamingTts, TtsConfig, TtsEvent};
 use crate::turn_detection::{HybridTurnDetector, TurnDetectionConfig, TurnDetectionResult};
-use crate::vad::{
-    ProcessableVad, SileroConfig, SileroVad, VadConfig, VadResult, VadState, VoiceActivityDetector,
-};
+use crate::vad::{SileroConfig, SileroVad, VadConfig, VadEngine, VadState, VoiceActivityDetector};
 use crate::PipelineError;
 use voice_agent_core::{
     AudioFrame, AudioProcessor, ControlFrame, Frame, GenerateRequest, Language, LanguageModel,
@@ -207,7 +205,7 @@ pub enum PipelineState {
 /// Voice Pipeline orchestrator
 pub struct VoicePipeline {
     config: PipelineConfig,
-    vad: Arc<dyn ProcessableVad>,
+    vad: Arc<dyn VadEngine>,
     turn_detector: Arc<HybridTurnDetector>,
     /// STT backend (StreamingStt or IndicConformerStt)
     stt: Arc<Mutex<dyn SttBackend + Send>>,
@@ -238,7 +236,7 @@ impl VoicePipeline {
     pub fn simple(config: PipelineConfig) -> Result<Self, PipelineError> {
         // Try to load Silero VAD model (production-ready)
         let silero_path = std::path::Path::new("models/vad/silero_vad.onnx");
-        let vad: Arc<dyn ProcessableVad> = if silero_path.exists() {
+        let vad: Arc<dyn VadEngine> = if silero_path.exists() {
             let silero_config = SileroConfig {
                 threshold: config.vad.threshold,
                 sample_rate: config.vad.sample_rate,
@@ -324,7 +322,7 @@ impl VoicePipeline {
     ) -> Result<Self, PipelineError> {
         // Try to load Silero VAD model (production-ready)
         let silero_path = std::path::Path::new("models/vad/silero_vad.onnx");
-        let vad: Arc<dyn ProcessableVad> = if silero_path.exists() {
+        let vad: Arc<dyn VadEngine> = if silero_path.exists() {
             let silero_config = SileroConfig {
                 threshold: config.vad.threshold,
                 sample_rate: config.vad.sample_rate,

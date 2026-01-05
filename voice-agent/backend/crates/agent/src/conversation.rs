@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 use crate::intent::{DetectedIntent, IntentDetector};
-use crate::memory::{ConversationMemory, MemoryConfig, MemoryEntry};
+use crate::memory::MemoryConfig;
+use crate::memory_legacy::{ConversationMemory, MemoryEntry};
 use crate::stage::{ConversationStage, StageManager, TransitionReason};
 use crate::AgentError;
 use voice_agent_core::{Turn, TurnRole};
