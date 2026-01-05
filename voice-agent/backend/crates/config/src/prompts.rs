@@ -293,6 +293,25 @@ impl SystemPrompt {
         prompt.push_str("- human/agent/manager/complaint → escalate_to_human()\n");
         prompt.push_str("- send SMS/whatsapp → send_sms(phone)\n\n");
 
+        // Add goal-driven behavior instructions
+        prompt.push_str("## Goal-Driven Conversation (CRITICAL)\n");
+        prompt.push_str("ALWAYS follow the goal context provided in each message. The goal context tells you:\n");
+        prompt.push_str("1. Current Goal: What the customer is trying to achieve\n");
+        prompt.push_str("2. Missing Info: What you still need to collect\n");
+        prompt.push_str("3. Next Action: What you MUST do next\n\n");
+
+        prompt.push_str("### Balance Transfer Process (for customers from Muthoot/Manappuram/IIFL):\n");
+        prompt.push_str("EXPLAIN this clearly: Kotak pays off existing lender DIRECTLY - customer does NOT need cash!\n");
+        prompt.push_str("Process: (1) Bring gold to Kotak branch → (2) We verify gold → (3) We pay off old loan directly → (4) You get new Kotak loan same day\n");
+        prompt.push_str("Key benefits: No cash needed, lower interest (10.5%), same gold, same day process\n\n");
+
+        prompt.push_str("### Proactive Behavior:\n");
+        prompt.push_str("- NEVER forget customer's goal mid-conversation\n");
+        prompt.push_str("- After answering a question, ALWAYS guide back to goal completion\n");
+        prompt.push_str("- If customer asks about branch/location, ALSO remind them of their main goal\n");
+        prompt.push_str("- ALWAYS offer: branch visit, RM callback, or next steps\n");
+        prompt.push_str("- ALWAYS try to capture lead details (name + phone) for follow-up\n\n");
+
         // Add few-shot examples for better accuracy
         prompt.push_str("## Response Examples\n");
         prompt.push_str("Example 1 - Balance Transfer:\n");
@@ -310,7 +329,34 @@ impl SystemPrompt {
 
         prompt.push_str("Example 4 - Eligibility:\n");
         prompt.push_str("  User: I have 50 grams gold, how much loan?\n");
-        prompt.push_str("  [CALL check_eligibility with gold_weight=50]\n");
+        prompt.push_str("  [CALL check_eligibility with gold_weight=50]\n\n");
+
+        prompt.push_str("Example 5 - Balance Transfer No Cash Objection:\n");
+        prompt.push_str("  User: I don't have cash to close Muthoot loan\n");
+        prompt.push_str("  You: No problem! With Kotak balance transfer, you don't need any cash. We pay off Muthoot directly.\n");
+        prompt.push_str("       Just bring your gold and KYC documents. We'll close your old loan and give you a new Kotak loan same day.\n");
+        prompt.push_str("       Would you like me to find the nearest branch for you?\n\n");
+
+        prompt.push_str("Example 6 - Stay Goal-Focused:\n");
+        prompt.push_str("  [Goal: Balance Transfer, Customer asked about branch]\n");
+        prompt.push_str("  User: Where is nearest branch in Noida?\n");
+        prompt.push_str("  You: [CALL find_branches with city=Noida]\n");
+        prompt.push_str("       Based on results: The nearest branch is in Sector 18, Noida.\n");
+        prompt.push_str("       Since you're looking to transfer from Muthoot, you can visit with your gold and we'll complete the transfer same day.\n");
+        prompt.push_str("       Should I schedule an appointment or have our relationship manager call you?\n\n");
+
+        prompt.push_str("Example 7 - Customer Info Recall (CRITICAL):\n");
+        prompt.push_str("  [Customer Details: Name=Ayush, Phone=8544130924, Loan=₹10 lakh, Lender=Muthoot]\n");
+        prompt.push_str("  User: Can you recall my phone number?\n");
+        prompt.push_str("  You: Of course, Ayush! Your phone number is 8544130924. Shall I have our relationship manager call you on this number?\n\n");
+
+        prompt.push_str("## IMPORTANT: Customer Details Section\n");
+        prompt.push_str("You will receive a 'Customer Details' section in each message with information the customer has shared.\n");
+        prompt.push_str("ALWAYS use this information to:\n");
+        prompt.push_str("1. Address customer by name if known\n");
+        prompt.push_str("2. Recall their phone number, loan amount, lender, etc. when asked\n");
+        prompt.push_str("3. Never ask for information already in this section\n");
+        prompt.push_str("4. Reference these details naturally in your responses\n");
 
         prompt
     }

@@ -517,10 +517,12 @@ impl IntentDetector {
                 slot_type: SlotType::Currency,
                 multiplier: None, // Parse as-is (remove commas)
             },
-            // Plain large number (>=1000)
+            // Plain large number (4-8 digits, excluding phone number patterns)
+            // Phone numbers are 10 digits starting with 6-9, so we limit to 8 digits max
+            // and require word boundaries to avoid partial matches
             CompiledSlotPattern {
                 name: "plain_number".to_string(),
-                regex: Regex::new(r"(\d{4,})").unwrap(), // 4+ digits
+                regex: Regex::new(r"\b(\d{4,8})\b").unwrap(), // 4-8 digits only (not 10-digit phones)
                 slot_type: SlotType::Currency,
                 multiplier: None,
             },
@@ -546,7 +548,7 @@ impl IntentDetector {
         self.compiled_patterns
             .insert("gold_weight".to_string(), weight_patterns);
 
-        // Phone patterns
+        // Phone patterns - using phone_number to match DST slot naming
         let phone_patterns = vec![CompiledSlotPattern {
             name: "indian".to_string(),
             regex: Regex::new(r"(?:\+91)?([6-9]\d{9})").unwrap(),
@@ -554,7 +556,7 @@ impl IntentDetector {
             multiplier: None,
         }];
         self.compiled_patterns
-            .insert("phone".to_string(), phone_patterns);
+            .insert("phone_number".to_string(), phone_patterns);
 
         // Current lender patterns
         let lender_patterns = vec![
@@ -688,6 +690,32 @@ impl IntentDetector {
             if let Some((value, slot_type, confidence)) =
                 self.extract_slot_with_patterns(text, patterns)
             {
+                // Validate loan_amount to exclude phone-number-like values
+                if slot_name == "loan_amount" {
+                    // Skip if value looks like a phone number (10 digits starting with 6-9)
+                    if value.len() == 10 {
+                        if let Some(first_char) = value.chars().next() {
+                            if first_char >= '6' && first_char <= '9' && value.chars().all(|c| c.is_ascii_digit()) {
+                                tracing::debug!(
+                                    value = %value,
+                                    "Skipping loan_amount extraction - looks like phone number"
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    // Skip if value is unreasonably large (> 100 crore = 1 billion)
+                    if let Ok(amount) = value.parse::<f64>() {
+                        if amount > 1_000_000_000.0 {
+                            tracing::debug!(
+                                value = %value,
+                                "Skipping loan_amount extraction - unreasonably large"
+                            );
+                            continue;
+                        }
+                    }
+                }
+
                 slots.insert(
                     slot_name.clone(),
                     Slot {
@@ -1138,9 +1166,9 @@ mod tests {
         let detector = IntentDetector::new();
 
         let slots = detector.extract_slots("My number is 9876543210");
-        assert!(slots.contains_key("phone"));
+        assert!(slots.contains_key("phone_number"));
         assert_eq!(
-            slots.get("phone").unwrap().value,
+            slots.get("phone_number").unwrap().value,
             Some("9876543210".to_string())
         );
     }

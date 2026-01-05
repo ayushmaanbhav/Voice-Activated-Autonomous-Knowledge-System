@@ -87,8 +87,9 @@ impl SlotExtractor {
             (Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:thousand|k|हज़ार|hazar)").unwrap(), AmountMultiplier::Thousand),
             // Direct rupee amounts
             (Regex::new(r"(?:₹|rs\.?|rupees?)\s*(\d+(?:,\d+)*)").unwrap(), AmountMultiplier::Unit),
-            // Plain large numbers (likely amounts)
-            (Regex::new(r"\b(\d{5,7})\b").unwrap(), AmountMultiplier::Unit),
+            // Plain large numbers (5-8 digits, avoiding phone numbers)
+            // Phone numbers are 10 digits starting with 6-9, so we limit to 8 digits max
+            (Regex::new(r"\b(\d{5,8})\b").unwrap(), AmountMultiplier::Unit),
         ]
     }
 
@@ -483,6 +484,29 @@ impl SlotExtractor {
                     let num_str = num_match.as_str().replace(',', "");
                     if let Ok(num) = num_str.parse::<f64>() {
                         let amount = num * multiplier.value();
+
+                        // Skip if looks like a phone number (10-digit starting with 6-9)
+                        let clean_str = num_str.replace(',', "");
+                        if clean_str.len() == 10 {
+                            if let Some(first) = clean_str.chars().next() {
+                                if first >= '6' && first <= '9' {
+                                    tracing::debug!(
+                                        value = %clean_str,
+                                        "Skipping amount extraction - looks like phone number"
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+
+                        // Skip if unreasonably large (> 100 crore)
+                        if amount > 1_000_000_000.0 {
+                            tracing::debug!(
+                                amount = amount,
+                                "Skipping amount extraction - unreasonably large"
+                            );
+                            continue;
+                        }
 
                         // Confidence based on context
                         let confidence = if lower.contains("loan") || lower.contains("lakh")

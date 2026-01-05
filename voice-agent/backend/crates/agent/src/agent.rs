@@ -1625,10 +1625,11 @@ impl GoldLoanAgent {
             let dst = self.dialogue_state.read();
             let dst_context = dst.state_context();
 
-            // Add collected customer information
+            // Add collected customer information prominently
+            // This ensures the LLM can recall customer details like name, phone, loan amount
             if !dst_context.is_empty() && dst_context != "No information collected yet." {
                 let dst_section = format!(
-                    "## Collected Customer Information\n{}\n\n## Slots Needing Confirmation\n{}",
+                    "## IMPORTANT: Customer Details (Use these for recall)\n{}\n\n## Slots Needing Confirmation\n{}",
                     dst_context,
                     if dst.slots_needing_confirmation().is_empty() {
                         "None".to_string()
@@ -1637,6 +1638,17 @@ impl GoldLoanAgent {
                     }
                 );
                 builder = builder.with_context(&dst_section);
+            }
+
+            // Also add core memory facts for additional recall capability
+            let human_block = self.conversation.agentic_memory().core.human_snapshot();
+            if !human_block.facts.is_empty() {
+                let facts_str = human_block.facts
+                    .iter()
+                    .map(|(k, entry)| format!("- {}: {}", k, entry.value))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                builder = builder.with_context(&format!("## Customer Facts from Memory\n{}", facts_str));
             }
 
             // Phase 12: Add conversation goal context with next best action
