@@ -138,20 +138,20 @@
 
 ```mermaid
 graph TB
-    subgraph "Client Layer"
+    subgraph Client[Client Layer]
         WEB[Web Browser]
         MOB[Mobile App]
         TEL[Telephony/SIP]
         API[REST API]
     end
 
-    subgraph "Transport Layer"
+    subgraph Transport[Transport Layer]
         WS[WebSocket Server]
         WEBRTC[WebRTC Signaling]
         HTTP[HTTP Endpoints]
     end
 
-    subgraph "Core Pipeline"
+    subgraph Pipeline[Core Pipeline]
         direction TB
         VAD[Voice Activity Detection]
         STT[Speech-to-Text]
@@ -160,14 +160,14 @@ graph TB
         TTS[Text-to-Speech]
     end
 
-    subgraph "Intelligence Layer"
+    subgraph Intelligence[Intelligence Layer]
         RAG[Hybrid RAG Engine]
         LLM[Local LLM Inference]
         DST[Dialogue State Tracker]
         TOOLS[MCP Tool Executor]
     end
 
-    subgraph "Data Layer"
+    subgraph Data[Data Layer]
         QDRANT[(Qdrant Vector DB)]
         SCYLLA[(ScyllaDB)]
         CONFIG[YAML Configs]
@@ -295,28 +295,28 @@ graph TB
 
 ```mermaid
 graph TD
-    subgraph "Entry Point"
+    subgraph Entry[Entry Point]
         SERVER[server]
     end
 
-    subgraph "Orchestration"
+    subgraph Orchestration[Orchestration]
         AGENT[agent]
         PIPELINE[pipeline]
     end
 
-    subgraph "Intelligence"
+    subgraph Intel[Intelligence]
         RAG[rag]
         LLM[llm]
         TOOLS[tools]
         TEXT[text_processing]
     end
 
-    subgraph "Infrastructure"
+    subgraph Infra[Infrastructure]
         TRANSPORT[transport]
         PERSISTENCE[persistence]
     end
 
-    subgraph "Foundation"
+    subgraph Foundation[Foundation]
         CONFIG[config]
         CORE[core]
     end
@@ -438,15 +438,15 @@ graph TD
 
 ```mermaid
 sequenceDiagram
-    participant U as User (Voice)
+    participant U as User
     participant T as Transport
     participant P as Pipeline
     participant A as Agent
     participant R as RAG
     participant L as LLM
-    participant TTS as TTS Engine
+    participant S as TTS
 
-    U->>T: Audio Stream (WebRTC/WS)
+    U->>T: Audio Stream
     T->>P: Raw Audio Frames
 
     loop VAD Processing
@@ -459,25 +459,25 @@ sequenceDiagram
 
     par Parallel Processing
         A->>R: RAG Query
-        R->>R: Hybrid Search (Dense + Sparse)
+        R->>R: Hybrid Search
         R->>R: Cross-Encoder Reranking
         R-->>A: Relevant Documents
-    and
+    and DST Update
         A->>A: Update DST State
         A->>A: Detect Intent
     end
 
-    A->>L: Generate Response (Streaming)
+    A->>L: Generate Response
 
     loop Token Streaming
         L-->>A: Token Chunk
         A->>A: Sentence Detection
-        A->>TTS: Complete Sentence
-        TTS-->>T: Audio Frame
+        A->>S: Complete Sentence
+        S-->>T: Audio Frame
         T-->>U: Play Audio
     end
 
-    Note over U,TTS: First audio plays before LLM completes
+    Note over U,S: First audio plays before LLM completes
 ```
 
 ### Latency Breakdown
@@ -585,7 +585,7 @@ sequenceDiagram
 
 ```mermaid
 graph TB
-    subgraph "Option 1: Single Node"
+    subgraph Single[Single Node Deployment]
         SN_APP[VARTALAAP Binary]
         SN_QD[(Qdrant)]
         SN_SC[(ScyllaDB)]
@@ -596,16 +596,16 @@ graph TB
         SN_APP --> SN_OL
     end
 
-    subgraph "Option 2: Distributed"
+    subgraph Distributed[Distributed Deployment]
         LB[Load Balancer]
 
-        subgraph "App Tier"
+        subgraph AppTier[App Tier]
             APP1[VARTALAAP-1]
             APP2[VARTALAAP-2]
             APP3[VARTALAAP-3]
         end
 
-        subgraph "Data Tier"
+        subgraph DataTier[Data Tier]
             QD[(Qdrant Cluster)]
             SC[(ScyllaDB Cluster)]
             OL[Ollama Pool]
@@ -870,28 +870,28 @@ pub trait Retriever: Send + Sync + 'static {
 
 ```mermaid
 graph LR
-    subgraph "Query Processing"
+    subgraph QueryProc[Query Processing]
         Q[User Query] --> QE[Query Expansion]
         QE --> CL[Cross-Lingual Norm]
     end
 
-    subgraph "Parallel Retrieval"
-        CL --> DS[Dense Search<br/>Qdrant]
-        CL --> SS[Sparse Search<br/>Tantivy BM25]
+    subgraph Retrieval[Parallel Retrieval]
+        CL --> DS[Dense: Qdrant]
+        CL --> SS[Sparse: Tantivy]
     end
 
-    subgraph "Fusion & Ranking"
+    subgraph Ranking[Fusion and Ranking]
         DS --> RRF[RRF Fusion]
         SS --> RRF
-        RRF --> RR[Cross-Encoder<br/>Reranking]
+        RRF --> RR[Cross-Encoder Rerank]
         RR --> EE{Early Exit?}
         EE -->|Yes| OUT[Top-K Results]
         EE -->|No| RR
     end
 
-    subgraph "Context Management"
-        OUT --> CS[Context Sizing<br/>by Stage]
-        CS --> CC[Context<br/>Compression]
+    subgraph Context[Context Management]
+        OUT --> CS[Stage-Based Sizing]
+        CS --> CC[Compression]
         CC --> LLM[To LLM]
     end
 ```
