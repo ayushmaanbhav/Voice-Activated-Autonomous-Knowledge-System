@@ -187,7 +187,8 @@ impl Default for AgentConfig {
             rag_timing_strategy: RagTimingStrategy::default(),
             // P1-1 FIX: Default to Ollama for local development
             // Can be overridden via config to use Claude, OpenAI, or Azure
-            llm_provider: LlmProviderConfig::ollama("llama3.2"),
+            // P6 FIX: Use qwen2.5:1.5b-instruct-q4_K_M for better Hindi/English support
+            llm_provider: LlmProviderConfig::ollama("qwen2.5:1.5b-instruct-q4_K_M"),
             // P1-2 FIX: Speculative decoding disabled by default
             // Enable via config with speculative.enabled = true
             speculative: SpeculativeDecodingConfig::default(),

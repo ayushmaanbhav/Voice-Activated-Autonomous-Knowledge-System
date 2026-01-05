@@ -14,18 +14,23 @@
 use axum::{
     extract::State,
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, sse::{Event, Sse}},
     Json,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use parking_lot::Mutex;
+use futures::stream::Stream;
+use std::convert::Infallible;
 
 use crate::state::AppState;
 use voice_agent_pipeline::stt::{IndicConformerStt, IndicConformerConfig};
 
 /// Faster-whisper HTTP service URL
 const WHISPER_SERVICE_URL: &str = "http://127.0.0.1:8091";
+
+/// TTS HTTP service URL (IndicF5)
+const TTS_SERVICE_URL: &str = "http://127.0.0.1:8092";
 
 /// Request for push-to-talk processing
 #[derive(Debug, Deserialize)]
@@ -36,6 +41,10 @@ pub struct PttRequest {
     pub audio_format: String,
     /// Language code (hi, en, ta, etc.)
     pub language: String,
+    /// Optional session ID for conversation continuity
+    /// If provided, reuses existing session; otherwise creates new one
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Response from push-to-talk processing
@@ -59,6 +68,8 @@ pub struct PttResponse {
     pub metrics: PttMetrics,
     /// Current processing phase (for UI status updates)
     pub phase: String,
+    /// Session ID for conversation continuity (send back in next request)
+    pub session_id: String,
 }
 
 /// Processing metrics with per-phase timing
@@ -124,6 +135,45 @@ async fn transcribe_with_whisper(audio: &[f32], language: &str) -> Result<String
     );
 
     Ok(text)
+}
+
+/// Call IndicF5 TTS HTTP service to synthesize speech
+async fn synthesize_with_tts(text: &str, language: &str) -> Result<(String, String), String> {
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("{}/synthesize", TTS_SERVICE_URL))
+        .json(&serde_json::json!({
+            "text": text,
+            "language": language
+        }))
+        .timeout(std::time::Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|e| format!("TTS service request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("TTS service error {}: {}", status, body));
+    }
+
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse TTS response: {}", e))?;
+
+    let audio = result["audio"].as_str().unwrap_or("").to_string();
+    let format = result["format"].as_str().unwrap_or("wav").to_string();
+    let proc_time = result["processing_time_seconds"].as_f64().unwrap_or(0.0);
+    let duration = result["duration_seconds"].as_f64().unwrap_or(0.0);
+
+    tracing::info!(
+        "IndicF5 TTS synthesized in {:.2}s, audio duration: {:.2}s",
+        proc_time,
+        duration
+    );
+
+    Ok((audio, format))
 }
 
 /// Get or initialize IndicConformer STT for Indian languages
@@ -235,6 +285,8 @@ pub async fn handle_ptt(
         } else {
             "मुझे कुछ सुनाई नहीं दिया। कृपया फिर से बोलें।"
         };
+        // Preserve session_id if provided, or generate new one
+        let session_id = request.session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         return (
             StatusCode::OK,
             Json(serde_json::json!({
@@ -245,7 +297,8 @@ pub async fn handle_ptt(
                 "assistant_text_original": if use_english { serde_json::Value::Null } else { serde_json::json!("I didn't hear anything. Please speak again.") },
                 "audio_response": null,
                 "metrics": metrics,
-                "phase": "complete"
+                "phase": "complete",
+                "session_id": session_id
             })),
         );
     }
@@ -271,21 +324,37 @@ pub async fn handle_ptt(
 
     // 5. Call LLM via Agent pipeline (with RAG + tools)
     let llm_start = std::time::Instant::now();
-    let llm_response = match process_with_agent(&state, text_for_llm, &request.language).await {
-        Ok(response) => response,
+    let (llm_response, session_id) = match process_with_agent(
+        &state,
+        text_for_llm,
+        &request.language,
+        request.session_id.as_deref(),
+    ).await {
+        Ok((response, sid)) => (response, sid),
         Err(e) => {
             tracing::error!("Agent processing failed: {}", e);
-            // Fallback to basic acknowledgment
-            format_fallback_response(text_for_llm, &request.language)
+            // Fallback to basic acknowledgment - generate new session_id
+            let fallback_sid = uuid::Uuid::new_v4().to_string();
+            (format_fallback_response(text_for_llm, &request.language), fallback_sid)
         }
     };
     metrics.llm_ms = llm_start.elapsed().as_millis() as u64;
 
     tracing::info!("LLM response: '{}'", llm_response);
 
-    // 6. Generate TTS (placeholder - return null for now)
+    // 6. Generate TTS via IndicF5 service
     let tts_start = std::time::Instant::now();
-    let audio_response: Option<String> = None;
+    let audio_response = match synthesize_with_tts(&llm_response, &request.language).await {
+        Ok((audio_b64, format)) => {
+            tracing::info!("TTS generated {} bytes of {} audio", audio_b64.len(), format);
+            Some(audio_b64)
+        }
+        Err(e) => {
+            tracing::warn!("TTS generation failed: {}", e);
+            None
+        }
+    };
+    let audio_format = if audio_response.is_some() { Some("wav".to_string()) } else { None };
     metrics.tts_ms = tts_start.elapsed().as_millis() as u64;
 
     metrics.total_ms = start.elapsed().as_millis() as u64;
@@ -298,9 +367,10 @@ pub async fn handle_ptt(
         assistant_text: llm_response,
         assistant_text_original: None,
         audio_response,
-        audio_format: None,
+        audio_format,
         metrics,
         phase: "complete".to_string(),
+        session_id,
     };
 
     (StatusCode::OK, Json(serde_json::to_value(response).unwrap()))
@@ -432,14 +502,65 @@ fn extract_wav_pcm_f32(wav_bytes: &[u8]) -> Result<Vec<f32>, String> {
 }
 
 /// Process user input through the full Agent pipeline (LLM + RAG + tools)
-async fn process_with_agent(state: &AppState, user_text: &str, language: &str) -> Result<String, String> {
+/// Returns (response_text, session_id) for conversation continuity
+async fn process_with_agent(
+    state: &AppState,
+    user_text: &str,
+    language: &str,
+    existing_session_id: Option<&str>,
+) -> Result<(String, String), String> {
     use voice_agent_agent::AgentConfig;
 
-    // Create agent config with user's language
+    // Try to reuse existing session if provided
+    let session = if let Some(sid) = existing_session_id {
+        if let Some(existing) = state.sessions.get(sid) {
+            tracing::info!(
+                session_id = %sid,
+                "Reusing existing PTT session for conversation continuity"
+            );
+            existing
+        } else {
+            tracing::warn!(
+                session_id = %sid,
+                "Session not found, creating new one"
+            );
+            create_new_session(state, language)?
+        }
+    } else {
+        create_new_session(state, language)?
+    };
+
+    let session_id = session.id.clone();
+
+    tracing::info!(
+        session_id = %session_id,
+        language = ?language,
+        "Processing PTT request"
+    );
+
+    // Process through agent pipeline
+    let response = session
+        .agent
+        .process(user_text)
+        .await
+        .map_err(|e| format!("Agent processing failed: {}", e))?;
+
+    // Don't remove session - keep it for conversation continuity
+    // Sessions will be cleaned up by timeout/explicit end
+
+    Ok((response, session_id))
+}
+
+/// Create a new agent session
+fn create_new_session(
+    state: &AppState,
+    language: &str,
+) -> Result<std::sync::Arc<crate::session::Session>, String> {
+    use voice_agent_agent::AgentConfig;
+
     let mut config = AgentConfig::default();
     config.language = language.to_string();
 
-    // Create a new session with full integration (RAG + tools)
     let session = state
         .sessions
         .create_with_full_integration(
@@ -452,20 +573,10 @@ async fn process_with_agent(state: &AppState, user_text: &str, language: &str) -
     tracing::info!(
         session_id = %session.id,
         language = ?language,
-        "Created PTT session for agent processing"
+        "Created new PTT session"
     );
 
-    // Process through agent pipeline
-    let response = session
-        .agent
-        .process(user_text)
-        .await
-        .map_err(|e| format!("Agent processing failed: {}", e))?;
-
-    // Clean up session (PTT is stateless per-request)
-    state.sessions.remove(&session.id);
-
-    Ok(response)
+    Ok(session)
 }
 
 /// Fallback response when agent processing fails
@@ -722,4 +833,197 @@ pub async fn ptt_health() -> impl IntoResponse {
             })),
         )
     }
+}
+
+/// SSE event types for streaming PTT
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PttEvent {
+    /// User's transcribed text (sent as soon as STT completes)
+    UserText {
+        text: String,
+        corrected: Option<String>,
+        session_id: String,
+    },
+    /// Assistant's response text (sent when LLM completes)
+    AssistantText {
+        text: String,
+    },
+    /// Audio response ready (sent when TTS completes)
+    AudioReady {
+        audio: String,
+        format: String,
+    },
+    /// Processing complete with metrics
+    Complete {
+        metrics: PttMetrics,
+    },
+    /// Error occurred
+    Error {
+        message: String,
+    },
+}
+
+/// Handle push-to-talk request with SSE streaming
+/// This endpoint streams events as processing progresses:
+/// 1. user_text - sent immediately after STT completes
+/// 2. assistant_text - sent when LLM responds
+/// 3. audio_ready - sent when TTS completes
+/// 4. complete - sent with final metrics
+pub async fn handle_ptt_stream(
+    State(state): State<AppState>,
+    Json(request): Json<PttRequest>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(10);
+
+    // Spawn async task to process and send events
+    tokio::spawn(async move {
+        let start = std::time::Instant::now();
+        let mut metrics = PttMetrics::default();
+
+        // Helper to send event
+        let send_event = |tx: &tokio::sync::mpsc::Sender<Result<Event, Infallible>>, event: PttEvent| {
+            let data = serde_json::to_string(&event).unwrap_or_default();
+            let _ = tx.try_send(Ok(Event::default().data(data)));
+        };
+
+        tracing::info!(
+            "PTT stream request: language={}, audio_format={}, audio_size={}",
+            request.language,
+            request.audio_format,
+            request.audio.len()
+        );
+
+        // 1. Decode audio from base64
+        let audio_bytes = match BASE64.decode(&request.audio) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                send_event(&tx, PttEvent::Error { message: format!("Invalid base64 audio: {}", e) });
+                return;
+            }
+        };
+
+        // 2. Convert audio to PCM 16kHz mono f32
+        let pcm_f32 = match convert_to_pcm_f32(&audio_bytes, &request.audio_format).await {
+            Ok(pcm) => pcm,
+            Err(e) => {
+                send_event(&tx, PttEvent::Error { message: format!("Audio conversion failed: {}", e) });
+                return;
+            }
+        };
+
+        // 3. STT
+        let stt_start = std::time::Instant::now();
+        let use_english = is_english(&request.language);
+
+        let stt_text = if use_english {
+            match transcribe_with_whisper(&pcm_f32, &request.language).await {
+                Ok(text) => text,
+                Err(e) => {
+                    send_event(&tx, PttEvent::Error { message: format!("STT failed: {}", e) });
+                    return;
+                }
+            }
+        } else {
+            if let Err(e) = get_indicconformer_stt(&request.language) {
+                send_event(&tx, PttEvent::Error { message: e });
+                return;
+            }
+            let stt_guard = STT_INSTANCE.lock();
+            let stt = stt_guard.as_ref().unwrap();
+            match stt.process(&pcm_f32) {
+                Ok(Some(result)) => result.text,
+                Ok(None) => String::new(),
+                Err(e) => {
+                    tracing::error!("IndicConformer STT error: {}", e);
+                    String::new()
+                }
+            }
+        };
+        metrics.stt_ms = stt_start.elapsed().as_millis() as u64;
+
+        if stt_text.is_empty() {
+            let session_id = request.session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            send_event(&tx, PttEvent::UserText {
+                text: String::new(),
+                corrected: None,
+                session_id: session_id.clone(),
+            });
+            send_event(&tx, PttEvent::AssistantText {
+                text: if use_english {
+                    "I didn't hear anything. Please speak again.".to_string()
+                } else {
+                    "मुझे कुछ सुनाई नहीं दिया। कृपया फिर से बोलें।".to_string()
+                },
+            });
+            send_event(&tx, PttEvent::Complete { metrics });
+            return;
+        }
+
+        // 4. Grammar correction
+        let grammar_start = std::time::Instant::now();
+        let (corrected, corrections) = state.phonetic_corrector.correct(&stt_text);
+        let corrected_text = if !corrections.is_empty() {
+            tracing::info!(
+                original = stt_text.as_str(),
+                corrected = corrected.as_str(),
+                "Phonetic correction applied"
+            );
+            Some(corrected)
+        } else {
+            None
+        };
+        metrics.grammar_ms = grammar_start.elapsed().as_millis() as u64;
+
+        // Create/get session
+        let session_id = request.session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        // Send user text immediately!
+        send_event(&tx, PttEvent::UserText {
+            text: stt_text.clone(),
+            corrected: corrected_text.clone(),
+            session_id: session_id.clone(),
+        });
+
+        let text_for_llm = corrected_text.as_ref().unwrap_or(&stt_text);
+
+        // 5. LLM processing
+        let llm_start = std::time::Instant::now();
+        let llm_response = match process_with_agent(
+            &state,
+            text_for_llm,
+            &request.language,
+            Some(&session_id),
+        ).await {
+            Ok((response, _sid)) => response,
+            Err(e) => {
+                tracing::error!("Agent processing failed: {}", e);
+                format_fallback_response(text_for_llm, &request.language)
+            }
+        };
+        metrics.llm_ms = llm_start.elapsed().as_millis() as u64;
+
+        // Send assistant text
+        send_event(&tx, PttEvent::AssistantText {
+            text: llm_response.clone(),
+        });
+
+        // 6. TTS
+        let tts_start = std::time::Instant::now();
+        if let Ok((audio_b64, format)) = synthesize_with_tts(&llm_response, &request.language).await {
+            send_event(&tx, PttEvent::AudioReady {
+                audio: audio_b64,
+                format,
+            });
+        }
+        metrics.tts_ms = tts_start.elapsed().as_millis() as u64;
+
+        metrics.total_ms = start.elapsed().as_millis() as u64;
+
+        // Send completion
+        send_event(&tx, PttEvent::Complete { metrics });
+    });
+
+    Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .keep_alive(axum::response::sse::KeepAlive::default())
 }

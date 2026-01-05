@@ -39,6 +39,8 @@ pub struct PhoneticCorrector {
     confusion_rules: HashMap<String, String>,
     /// Contextual rules: (context_word, error_word) -> correction
     contextual_rules: HashMap<(String, String), String>,
+    /// Phrase-level corrections (lowercase phrase -> correction)
+    phrase_rules: Vec<(String, String)>,
     /// Double Metaphone codes for domain vocabulary
     metaphone_index: HashMap<String, Vec<String>>,
     /// Configuration
@@ -80,11 +82,13 @@ impl PhoneticCorrector {
         // Build confusion rules
         let confusion_rules = Self::build_confusion_rules();
         let contextual_rules = Self::build_contextual_rules();
+        let phrase_rules = Self::build_phrase_rules();
 
         Self {
             symspell,
             confusion_rules,
             contextual_rules,
+            phrase_rules,
             metaphone_index,
             config,
         }
@@ -158,9 +162,11 @@ impl PhoneticCorrector {
         rules.insert("along".to_string(), "loan".to_string());
         rules.insert("a loan".to_string(), "loan".to_string());
 
-        // "lone/long" -> "loan"
+        // "lone/long/loon" -> "loan"
         rules.insert("lone".to_string(), "loan".to_string());
         rules.insert("long".to_string(), "loan".to_string());
+        rules.insert("loon".to_string(), "loan".to_string());
+        rules.insert("loom".to_string(), "loan".to_string());
 
         // Kotak misspellings
         rules.insert("kotuk".to_string(), "Kotak".to_string());
@@ -255,6 +261,81 @@ impl PhoneticCorrector {
         rules
     }
 
+    /// Build phrase-level correction rules for common ASR errors
+    fn build_phrase_rules() -> Vec<(String, String)> {
+        vec![
+            // "It's me about" -> "tell me about" (very common STT error)
+            ("it's me about".to_string(), "tell me about".to_string()),
+            ("its me about".to_string(), "tell me about".to_string()),
+            ("it me about".to_string(), "tell me about".to_string()),
+            // "It's me" at start -> "tell me"
+            ("it's me".to_string(), "tell me".to_string()),
+            ("its me".to_string(), "tell me".to_string()),
+            // "can you it's me" -> "can you tell me"
+            ("can you it's me".to_string(), "can you tell me".to_string()),
+            // "please it's me" -> "please tell me"
+            ("please it's me".to_string(), "please tell me".to_string()),
+            // Gold loan specific phrases - STT commonly mishears these
+            ("gold alone".to_string(), "gold loan".to_string()),
+            ("gol alone".to_string(), "gold loan".to_string()),
+            ("goal alone".to_string(), "gold loan".to_string()),
+            ("gold loon".to_string(), "gold loan".to_string()),
+            ("gol loon".to_string(), "gold loan".to_string()),
+            ("goal loon".to_string(), "gold loan".to_string()),
+            ("gold long".to_string(), "gold loan".to_string()),
+            // Single-word mishears for "gold loan"
+            ("bulldol".to_string(), "gold loan".to_string()),
+            ("bulldoll".to_string(), "gold loan".to_string()),
+            ("goldol".to_string(), "gold loan".to_string()),
+            ("golddol".to_string(), "gold loan".to_string()),
+            ("workload".to_string(), "gold loan".to_string()), // common mishear
+            // "balance tranfer" -> "balance transfer"
+            ("balance tranfer".to_string(), "balance transfer".to_string()),
+            // Interest rate variations
+            ("intrest rate".to_string(), "interest rate".to_string()),
+            ("intrst rate".to_string(), "interest rate".to_string()),
+        ]
+    }
+
+    /// Apply phrase-level corrections to text
+    fn apply_phrase_corrections(&self, text: &str) -> (String, Vec<Correction>) {
+        let mut result = text.to_string();
+        let mut corrections = Vec::new();
+        let text_lower = text.to_lowercase();
+
+        for (phrase, replacement) in &self.phrase_rules {
+            if text_lower.contains(phrase) {
+                // Find the position and preserve original case where possible
+                if let Some(pos) = text_lower.find(phrase) {
+                    let original = &text[pos..pos + phrase.len()];
+                    // Replace in result (case-insensitive)
+                    let result_lower = result.to_lowercase();
+                    if let Some(result_pos) = result_lower.find(phrase) {
+                        let before = &result[..result_pos];
+                        let after = &result[result_pos + phrase.len()..];
+
+                        // Preserve capitalization of first letter
+                        let replacement_cased = if original.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                            capitalize_first(replacement)
+                        } else {
+                            replacement.clone()
+                        };
+
+                        result = format!("{}{}{}", before, replacement_cased, after);
+                        corrections.push(Correction {
+                            original: original.to_string(),
+                            corrected: replacement_cased,
+                            position: 0, // Phrase position
+                            rule: "phrase".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        (result, corrections)
+    }
+
     /// Correct a single word using confusion rules and SymSpell
     fn correct_word(&self, word: &str) -> Option<String> {
         let word_lower = word.to_lowercase();
@@ -345,10 +426,16 @@ impl PhoneticCorrector {
     /// Correct text with contextual awareness
     pub fn correct(&self, text: &str) -> (String, Vec<Correction>) {
         let mut corrections = Vec::new();
+
+        // 1. Apply phrase-level corrections first (highest priority)
+        let (text_after_phrases, phrase_corrections) = self.apply_phrase_corrections(text);
+        corrections.extend(phrase_corrections);
+
+        // 2. Now apply word-level corrections
         let mut result_words: Vec<String> = Vec::new();
 
         // Tokenize into words while preserving punctuation
-        let tokens: Vec<&str> = text.split_whitespace().collect();
+        let tokens: Vec<&str> = text_after_phrases.split_whitespace().collect();
 
         for (i, token) in tokens.iter().enumerate() {
             // Separate word from trailing punctuation
@@ -694,5 +781,27 @@ mod tests {
         let (corrected, _) = corrector.correct("gold alone?");
         assert!(corrected.ends_with('?'));
         assert!(corrected.contains("loan"));
+    }
+
+    #[test]
+    fn test_its_me_to_tell_me() {
+        let corrector = PhoneticCorrector::gold_loan();
+
+        // "It's me about Gold Loon" -> "tell me about Gold Loan"
+        let (corrected, corrections) = corrector.correct("It's me about Gold Loon.");
+        assert!(corrected.to_lowercase().contains("tell me about"));
+        assert!(corrected.to_lowercase().contains("gold loan"));
+        assert!(!corrections.is_empty());
+
+        // Simpler case
+        let (corrected, _) = corrector.correct("It's me about gold loan");
+        assert!(corrected.to_lowercase().starts_with("tell me"));
+    }
+
+    #[test]
+    fn test_loon_to_loan() {
+        let corrector = PhoneticCorrector::gold_loan();
+        let (corrected, _) = corrector.correct("gold loon");
+        assert!(corrected.to_lowercase().contains("gold loan"));
     }
 }

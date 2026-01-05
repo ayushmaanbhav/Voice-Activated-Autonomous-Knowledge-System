@@ -51,6 +51,135 @@ impl Default for PromptTemplates {
     }
 }
 
+/// Tool invocation rules for small models
+/// Maps detected intents to specific tools with clear conditions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolInvocationRules {
+    /// Rules for tool invocation
+    pub rules: Vec<ToolRule>,
+}
+
+/// A single tool invocation rule
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolRule {
+    /// Intent that triggers this rule
+    pub intent: String,
+    /// Tool to invoke
+    pub tool: String,
+    /// Required slots before invocation
+    pub required_slots: Vec<String>,
+    /// Human-readable description
+    pub description: String,
+}
+
+impl Default for ToolInvocationRules {
+    fn default() -> Self {
+        Self {
+            rules: vec![
+                // Savings calculation
+                ToolRule {
+                    intent: "savings_inquiry".to_string(),
+                    tool: "calculate_savings".to_string(),
+                    required_slots: vec!["loan_amount".to_string(), "current_interest_rate".to_string()],
+                    description: "When customer asks about savings or wants to switch, use calculate_savings with their loan amount and current rate".to_string(),
+                },
+                ToolRule {
+                    intent: "balance_transfer".to_string(),
+                    tool: "calculate_savings".to_string(),
+                    required_slots: vec!["loan_amount".to_string()],
+                    description: "For balance transfer requests, calculate savings to show benefits of switching".to_string(),
+                },
+                // Eligibility
+                ToolRule {
+                    intent: "eligibility_inquiry".to_string(),
+                    tool: "check_eligibility".to_string(),
+                    required_slots: vec!["gold_weight".to_string()],
+                    description: "When customer asks if they're eligible or how much loan, use check_eligibility with gold weight".to_string(),
+                },
+                // Documents
+                ToolRule {
+                    intent: "document_inquiry".to_string(),
+                    tool: "get_document_checklist".to_string(),
+                    required_slots: vec![],
+                    description: "When customer asks about documents needed, use get_document_checklist. For balance transfer use loan_type='balance_transfer'".to_string(),
+                },
+                // Branch
+                ToolRule {
+                    intent: "branch_inquiry".to_string(),
+                    tool: "find_branches".to_string(),
+                    required_slots: vec!["city".to_string()],
+                    description: "When customer asks about nearest branch, use find_branches with their city".to_string(),
+                },
+                // Appointment
+                ToolRule {
+                    intent: "appointment_request".to_string(),
+                    tool: "schedule_appointment".to_string(),
+                    required_slots: vec!["customer_name".to_string(), "phone_number".to_string()],
+                    description: "When customer wants to book appointment, use schedule_appointment with their details".to_string(),
+                },
+                // Gold price
+                ToolRule {
+                    intent: "gold_price_inquiry".to_string(),
+                    tool: "get_gold_price".to_string(),
+                    required_slots: vec![],
+                    description: "When customer asks about gold price or rate, use get_gold_price".to_string(),
+                },
+                // Comparison
+                ToolRule {
+                    intent: "comparison_inquiry".to_string(),
+                    tool: "compare_lenders".to_string(),
+                    required_slots: vec![],
+                    description: "When customer asks to compare with Muthoot/Manappuram/IIFL, use compare_lenders".to_string(),
+                },
+                // Lead capture
+                ToolRule {
+                    intent: "callback_request".to_string(),
+                    tool: "capture_lead".to_string(),
+                    required_slots: vec!["customer_name".to_string(), "phone_number".to_string()],
+                    description: "When customer wants callback, use capture_lead with their contact details".to_string(),
+                },
+                // SMS
+                ToolRule {
+                    intent: "sms_request".to_string(),
+                    tool: "send_sms".to_string(),
+                    required_slots: vec!["phone_number".to_string()],
+                    description: "When customer wants details via SMS, use send_sms".to_string(),
+                },
+                // Human escalation
+                ToolRule {
+                    intent: "human_escalation".to_string(),
+                    tool: "escalate_to_human".to_string(),
+                    required_slots: vec![],
+                    description: "When customer asks to talk to human/agent/manager, use escalate_to_human".to_string(),
+                },
+            ],
+        }
+    }
+}
+
+impl ToolInvocationRules {
+    /// Get rule for a given intent
+    pub fn get_rule(&self, intent: &str) -> Option<&ToolRule> {
+        self.rules.iter().find(|r| r.intent == intent)
+    }
+
+    /// Build tool rules section for prompt
+    pub fn build_prompt_section(&self) -> String {
+        let mut section = String::from("\n## Tool Invocation Rules (IMPORTANT)\n");
+        section.push_str("Use these rules to decide when to call tools:\n\n");
+
+        for rule in &self.rules {
+            section.push_str(&format!("**{}** → Call `{}`\n", rule.intent.replace("_", " "), rule.tool));
+            if !rule.required_slots.is_empty() {
+                section.push_str(&format!("  Required: {}\n", rule.required_slots.join(", ")));
+            }
+            section.push_str(&format!("  {}\n\n", rule.description));
+        }
+
+        section
+    }
+}
+
 /// System prompt configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemPrompt {
@@ -68,6 +197,9 @@ pub struct SystemPrompt {
     pub guidelines: Vec<String>,
     /// Things to avoid
     pub avoid: Vec<String>,
+    /// Tool invocation rules
+    #[serde(default)]
+    pub tool_rules: ToolInvocationRules,
 }
 
 impl Default for SystemPrompt {
@@ -82,34 +214,45 @@ impl Default for SystemPrompt {
                 "Highlight Kotak's advantages over competitors".to_string(),
                 "Guide customers through the application process".to_string(),
                 "Capture leads for callback if customer is interested".to_string(),
+                // Identity instructions
+                "When asked 'what is your name' or similar, respond: 'I am Priya, your Kotak Gold Loan assistant'".to_string(),
+                "Always introduce yourself by name when greeting customers".to_string(),
+                // Memory and context instructions (CRITICAL for small models)
+                "CRITICAL: REMEMBER all customer information. Never forget: name, phone, loan amount, interest rate, lender".to_string(),
+                "ALWAYS reference customer by name once known: '{name}, based on your ₹{amount} loan...'".to_string(),
+                "NEVER ask for information already provided. Check collected slots first.".to_string(),
+                "Before asking anything, summarize what you know: 'So far I have: Name={}, Amount={}, Rate={}'".to_string(),
+                // Conversion focus
+                "Drive toward appointment booking once customer shows interest".to_string(),
+                "After showing savings, ask: 'Would you like to schedule a branch visit?'".to_string(),
             ],
             compliance: vec![
                 "Never guarantee specific loan approval".to_string(),
                 "Always mention that rates are subject to change".to_string(),
                 "Disclose that gold valuation is done at branch".to_string(),
-                "Inform about terms and conditions".to_string(),
                 "Do not disparage competitors directly".to_string(),
             ],
             guidelines: vec![
                 "Be warm and professional".to_string(),
                 "Use simple language, avoid jargon".to_string(),
-                "Acknowledge customer concerns before responding".to_string(),
-                "Keep responses concise (under 60 words)".to_string(),
+                "Keep responses concise (under 50 words for voice)".to_string(),
                 "Use Hindi words naturally if customer uses them".to_string(),
+                "ALWAYS acknowledge info provided before asking next question".to_string(),
             ],
             avoid: vec![
+                "Asking for information already provided (CHECK SLOTS FIRST)".to_string(),
+                "Forgetting customer name, loan amount, or interest rate".to_string(),
                 "Making promises about approval".to_string(),
-                "Sharing personal opinions".to_string(),
-                "Discussing non-gold loan products unsolicited".to_string(),
                 "Being pushy or aggressive".to_string(),
-                "Sharing internal policies or processes".to_string(),
+                "Long responses (keep under 50 words)".to_string(),
             ],
+            tool_rules: ToolInvocationRules::default(),
         }
     }
 }
 
 impl SystemPrompt {
-    /// Build full system prompt text
+    /// Build full system prompt text with tool rules and examples
     pub fn build(&self) -> String {
         let mut prompt = format!(
             "{}\n\nYou are {}. You work for {}.\n\n",
@@ -135,6 +278,39 @@ impl SystemPrompt {
         for avoid in &self.avoid {
             prompt.push_str(&format!("- {}\n", avoid));
         }
+
+        // Add tool invocation rules - CRITICAL for tool calling accuracy
+        prompt.push_str("\n## Tool Rules (MUST FOLLOW)\n");
+        prompt.push_str("When customer intent matches these patterns, CALL the tool:\n");
+        prompt.push_str("- savings/switch/transfer/BT → calculate_savings(loan_amount, current_rate)\n");
+        prompt.push_str("- eligible/how much loan → check_eligibility(gold_weight)\n");
+        prompt.push_str("- documents/what to bring → get_document_checklist(loan_type)\n");
+        prompt.push_str("- branch/where/nearest → find_branches(city)\n");
+        prompt.push_str("- appointment/book/visit → schedule_appointment(name, phone)\n");
+        prompt.push_str("- gold price/sone ka rate → get_gold_price()\n");
+        prompt.push_str("- compare/vs/muthoot/manappuram → compare_lenders()\n");
+        prompt.push_str("- callback/call me back → capture_lead(name, phone)\n");
+        prompt.push_str("- human/agent/manager/complaint → escalate_to_human()\n");
+        prompt.push_str("- send SMS/whatsapp → send_sms(phone)\n\n");
+
+        // Add few-shot examples for better accuracy
+        prompt.push_str("## Response Examples\n");
+        prompt.push_str("Example 1 - Balance Transfer:\n");
+        prompt.push_str("  User: My name is Ayush, I have 10 lakh loan at 18% from Muthoot\n");
+        prompt.push_str("  You: Thanks Ayush! You have ₹10 lakh at 18% from Muthoot. Let me calculate your savings.\n");
+        prompt.push_str("  [CALL calculate_savings with loan_amount=1000000, current_rate=18]\n\n");
+
+        prompt.push_str("Example 2 - Document Inquiry:\n");
+        prompt.push_str("  User: What documents needed for transfer?\n");
+        prompt.push_str("  [CALL get_document_checklist with loan_type=balance_transfer]\n\n");
+
+        prompt.push_str("Example 3 - Identity:\n");
+        prompt.push_str("  User: What is your name?\n");
+        prompt.push_str("  You: I am Priya, your Kotak Gold Loan assistant. How can I help you today?\n\n");
+
+        prompt.push_str("Example 4 - Eligibility:\n");
+        prompt.push_str("  User: I have 50 grams gold, how much loan?\n");
+        prompt.push_str("  [CALL check_eligibility with gold_weight=50]\n");
 
         prompt
     }
@@ -516,5 +692,142 @@ mod tests {
         let responses = ResponseTemplates::default();
         assert!(responses.rate_inquiry.contains("9.5%"));
         assert!(responses.safety.contains("RBI"));
+    }
+
+    // ============================================
+    // TOOL INVOCATION RULES TESTS
+    // ============================================
+
+    #[test]
+    fn test_tool_rules_default() {
+        let rules = ToolInvocationRules::default();
+        assert!(!rules.rules.is_empty());
+        assert!(rules.rules.len() >= 10); // At least 10 rules
+    }
+
+    #[test]
+    fn test_tool_rules_get_rule() {
+        let rules = ToolInvocationRules::default();
+
+        // Test savings_inquiry rule
+        let savings_rule = rules.get_rule("savings_inquiry");
+        assert!(savings_rule.is_some());
+        assert_eq!(savings_rule.unwrap().tool, "calculate_savings");
+
+        // Test balance_transfer rule
+        let bt_rule = rules.get_rule("balance_transfer");
+        assert!(bt_rule.is_some());
+        assert_eq!(bt_rule.unwrap().tool, "calculate_savings");
+
+        // Test eligibility rule
+        let elig_rule = rules.get_rule("eligibility_inquiry");
+        assert!(elig_rule.is_some());
+        assert_eq!(elig_rule.unwrap().tool, "check_eligibility");
+
+        // Test document_inquiry rule
+        let doc_rule = rules.get_rule("document_inquiry");
+        assert!(doc_rule.is_some());
+        assert_eq!(doc_rule.unwrap().tool, "get_document_checklist");
+    }
+
+    #[test]
+    fn test_tool_rules_required_slots() {
+        let rules = ToolInvocationRules::default();
+
+        // calculate_savings needs loan_amount and current_interest_rate
+        let savings_rule = rules.get_rule("savings_inquiry").unwrap();
+        assert!(savings_rule.required_slots.contains(&"loan_amount".to_string()));
+        assert!(savings_rule.required_slots.contains(&"current_interest_rate".to_string()));
+
+        // check_eligibility needs gold_weight
+        let elig_rule = rules.get_rule("eligibility_inquiry").unwrap();
+        assert!(elig_rule.required_slots.contains(&"gold_weight".to_string()));
+
+        // schedule_appointment needs name and phone
+        let appt_rule = rules.get_rule("appointment_request").unwrap();
+        assert!(appt_rule.required_slots.contains(&"customer_name".to_string()));
+        assert!(appt_rule.required_slots.contains(&"phone_number".to_string()));
+
+        // escalate_to_human needs no slots
+        let escalate_rule = rules.get_rule("human_escalation").unwrap();
+        assert!(escalate_rule.required_slots.is_empty());
+    }
+
+    #[test]
+    fn test_tool_rules_all_intents_covered() {
+        let rules = ToolInvocationRules::default();
+
+        // All expected intents should have rules
+        let expected_intents = [
+            "savings_inquiry",
+            "balance_transfer",
+            "eligibility_inquiry",
+            "document_inquiry",
+            "branch_inquiry",
+            "appointment_request",
+            "gold_price_inquiry",
+            "comparison_inquiry",
+            "callback_request",
+            "sms_request",
+            "human_escalation",
+        ];
+
+        for intent in expected_intents {
+            assert!(rules.get_rule(intent).is_some(), "Missing rule for intent: {}", intent);
+        }
+    }
+
+    #[test]
+    fn test_tool_rules_build_prompt_section() {
+        let rules = ToolInvocationRules::default();
+        let section = rules.build_prompt_section();
+
+        // Should contain tool names
+        assert!(section.contains("calculate_savings"));
+        assert!(section.contains("check_eligibility"));
+        assert!(section.contains("get_document_checklist"));
+        assert!(section.contains("find_branches"));
+        assert!(section.contains("escalate_to_human"));
+
+        // Should contain intent keywords
+        assert!(section.contains("savings"));
+        assert!(section.contains("balance transfer"));
+        assert!(section.contains("eligibility"));
+        assert!(section.contains("document"));
+    }
+
+    #[test]
+    fn test_system_prompt_contains_tool_rules() {
+        let prompt = SystemPrompt::default();
+        let built = prompt.build();
+
+        // Should contain tool rules section
+        assert!(built.contains("Tool Rules"));
+        assert!(built.contains("calculate_savings"));
+        assert!(built.contains("check_eligibility"));
+
+        // Should contain examples
+        assert!(built.contains("Example"));
+        assert!(built.contains("Ayush"));
+    }
+
+    #[test]
+    fn test_system_prompt_contains_memory_instructions() {
+        let prompt = SystemPrompt::default();
+        let built = prompt.build();
+
+        // Should emphasize memory/context retention
+        assert!(built.contains("CRITICAL") || built.contains("REMEMBER"));
+        assert!(built.contains("NEVER") || built.contains("never"));
+    }
+
+    #[test]
+    fn test_system_prompt_identity() {
+        let prompt = SystemPrompt::default();
+        let built = prompt.build();
+
+        // Should contain identity handling
+        assert!(built.contains("Priya"));
+        assert!(built.contains("name"));
     }
 }

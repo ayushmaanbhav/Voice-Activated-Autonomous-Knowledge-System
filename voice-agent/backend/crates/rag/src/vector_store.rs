@@ -37,7 +37,8 @@ impl Default for VectorStoreConfig {
         Self {
             endpoint: endpoints::QDRANT_DEFAULT.to_string(), // P1 FIX: Use centralized constant
             collection: "gold_loan_knowledge".to_string(),
-            vector_dim: 384,
+            // P6 FIX: Match qwen3-embedding:0.6b which produces 1024 dims
+            vector_dim: 1024,
             distance: VectorDistance::Cosine,
             api_key: None,
         }

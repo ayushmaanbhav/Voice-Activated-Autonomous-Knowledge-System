@@ -12,6 +12,7 @@
  */
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
 import '../styles/animations.css';
 
 interface Message {
@@ -94,12 +95,18 @@ export default function SimplePTT() {
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguage] = useState<string>('en');
   const [prevLanguage, setPrevLanguage] = useState<string>('en');
+  // Session ID for conversation continuity (persists across PTT requests)
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [isLoadingGreeting, setIsLoadingGreeting] = useState(true);
   const [isTranslating, setIsTranslating] = useState(false);
 
   // Use ref to access current messages in async functions without stale closure
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
+
+  // Use ref to access current sessionId in async functions without stale closure
+  const sessionIdRef = useRef<string | null>(null);
+  sessionIdRef.current = sessionId;
 
   // Translate messages when language changes
   const translateMessages = useCallback(async (fromLang: string, toLang: string, currentMessages: Message[]): Promise<Message[]> => {
@@ -192,6 +199,8 @@ export default function SimplePTT() {
   useEffect(() => {
     const handleLanguageChange = async () => {
       setIsLoadingGreeting(true);
+      // Reset session on language change (new conversation context)
+      setSessionId(null);
 
       // Get new greeting for the new language
       const newGreeting = await fetchGreetingOnly(language);
@@ -441,19 +450,26 @@ export default function SimplePTT() {
   // Keep ref in sync with sendRecording callback
   sendRecordingRef.current = sendRecording;
 
-  // Process audio through backend
+  // Process audio through backend with SSE streaming
   const processAudio = async (audioBlob: Blob) => {
     try {
       setProcessingState({ stage: 'processing' });
 
-      // Convert blob to base64 for sending
+      // Convert blob to base64 for sending (chunked to avoid stack overflow)
       const arrayBuffer = await audioBlob.arrayBuffer();
-      const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+      }
+      const base64Audio = btoa(binary);
 
-      // Send to backend
+      // Send to streaming endpoint
       setProcessingState({ stage: 'stt' });
 
-      const response = await fetch(`${API_BASE}/process`, {
+      const response = await fetch(`${API_BASE}/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -462,6 +478,7 @@ export default function SimplePTT() {
           audio: base64Audio,
           audio_format: 'webm',
           language: language,
+          ...(sessionIdRef.current ? { session_id: sessionIdRef.current } : {}),
         }),
       });
 
@@ -470,35 +487,89 @@ export default function SimplePTT() {
         throw new Error(`Backend error: ${response.status} - ${errorText}`);
       }
 
-      setProcessingState({ stage: 'llm' });
-      const result = await response.json();
-
-      // Add user message
-      if (result.user_text) {
-        setMessages(prev => [...prev, {
-          id: `user-${Date.now()}`,
-          role: 'user',
-          text: result.user_text,
-          originalText: result.user_text_original,
-          timestamp: new Date(),
-        }]);
+      // Read SSE stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
       }
 
-      // Add assistant message
-      if (result.assistant_text) {
-        setMessages(prev => [...prev, {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          text: result.assistant_text,
-          originalText: result.assistant_text_original,
-          timestamp: new Date(),
-        }]);
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let pendingAudio: { audio: string; format: string } | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (!data) continue;
+
+            try {
+              const event = JSON.parse(data);
+
+              switch (event.type) {
+                case 'user_text':
+                  // User text received - show immediately!
+                  if (event.text) {
+                    setMessages(prev => [...prev, {
+                      id: `user-${Date.now()}`,
+                      role: 'user',
+                      text: event.corrected || event.text,
+                      originalText: event.corrected ? event.text : undefined,
+                      timestamp: new Date(),
+                    }]);
+                  }
+                  if (event.session_id) {
+                    setSessionId(event.session_id);
+                  }
+                  setProcessingState({ stage: 'llm' });
+                  break;
+
+                case 'assistant_text':
+                  // Assistant response received
+                  if (event.text) {
+                    setMessages(prev => [...prev, {
+                      id: `assistant-${Date.now()}`,
+                      role: 'assistant',
+                      text: event.text,
+                      timestamp: new Date(),
+                    }]);
+                  }
+                  setProcessingState({ stage: 'tts' });
+                  break;
+
+                case 'audio_ready':
+                  // TTS audio received - store for playing after stream ends
+                  pendingAudio = { audio: event.audio, format: event.format };
+                  break;
+
+                case 'complete':
+                  // Processing complete
+                  console.log('Processing metrics:', event.metrics);
+                  break;
+
+                case 'error':
+                  setError(event.message);
+                  setProcessingState({ stage: 'idle' });
+                  return;
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE event:', e, data);
+            }
+          }
+        }
       }
 
-      // Play TTS audio if available
-      if (result.audio_response) {
+      // Play audio after stream completes
+      if (pendingAudio) {
         setProcessingState({ stage: 'playing' });
-        await playAudio(result.audio_response, result.audio_format || 'wav');
+        await playAudio(pendingAudio.audio, pendingAudio.format);
       }
 
       setProcessingState({ stage: 'idle' });
@@ -645,7 +716,26 @@ export default function SimplePTT() {
               <div style={styles.messageRole}>
                 {msg.role === 'user' ? 'You' : 'Assistant'}
               </div>
-              <div style={styles.messageText}>{msg.text}</div>
+              <div style={styles.messageText}>
+                {msg.role === 'assistant' ? (
+                  <ReactMarkdown
+                    components={{
+                      p: ({ children }) => <p style={styles.mdParagraph}>{children}</p>,
+                      strong: ({ children }) => <strong style={styles.mdStrong}>{children}</strong>,
+                      ul: ({ children }) => <ul style={styles.mdList}>{children}</ul>,
+                      ol: ({ children }) => <ol style={styles.mdList}>{children}</ol>,
+                      li: ({ children }) => <li style={styles.mdListItem}>{children}</li>,
+                      h1: ({ children }) => <h1 style={styles.mdHeading}>{children}</h1>,
+                      h2: ({ children }) => <h2 style={styles.mdHeading}>{children}</h2>,
+                      h3: ({ children }) => <h3 style={styles.mdHeading}>{children}</h3>,
+                    }}
+                  >
+                    {msg.text}
+                  </ReactMarkdown>
+                ) : (
+                  msg.text
+                )}
+              </div>
               {msg.originalText && msg.originalText !== msg.text && (
                 <div style={styles.originalText}>
                   Original: {msg.originalText}
@@ -756,6 +846,11 @@ export default function SimplePTT() {
               }}>
                 {currentPhrase}
               </div>
+
+              {/* Right-side loading animation (mirrored) */}
+              {isProcessing && (
+                <ProcessingLoader stage={processingState.stage} reverse />
+              )}
             </div>
           )}
         </div>
@@ -851,7 +946,7 @@ export default function SimplePTT() {
 }
 
 // Processing Loader Component
-function ProcessingLoader({ stage }: { stage: ProcessingStage }) {
+function ProcessingLoader({ stage, reverse = false }: { stage: ProcessingStage; reverse?: boolean }) {
   return (
     <div style={styles.processingLoader}>
       <div style={styles.loaderDots}>
@@ -861,7 +956,7 @@ function ProcessingLoader({ stage }: { stage: ProcessingStage }) {
             style={{
               ...styles.loaderDot,
               animation: 'bounce 1.4s ease-in-out infinite',
-              animationDelay: `${i * 0.16}s`,
+              animationDelay: reverse ? `${(2 - i) * 0.16}s` : `${i * 0.16}s`,
               background: stage === 'playing' ? '#4ade80' : '#fbbf24',
             }}
           />
@@ -1077,6 +1172,26 @@ const styles: Record<string, React.CSSProperties> = {
   messageText: {
     fontSize: '16px',
     lineHeight: 1.5,
+  },
+  mdParagraph: {
+    margin: '0 0 8px 0',
+  },
+  mdStrong: {
+    fontWeight: 600,
+    color: '#f1f5f9',
+  },
+  mdList: {
+    margin: '8px 0',
+    paddingLeft: '20px',
+  },
+  mdListItem: {
+    marginBottom: '4px',
+  },
+  mdHeading: {
+    fontSize: '15px',
+    fontWeight: 600,
+    margin: '12px 0 8px 0',
+    color: '#f1f5f9',
   },
   originalText: {
     fontSize: '12px',

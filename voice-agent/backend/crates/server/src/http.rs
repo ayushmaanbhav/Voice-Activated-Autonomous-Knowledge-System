@@ -58,6 +58,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/ws/:session_id", get(ws_handler))
         // Push-to-talk
         .route("/api/ptt/process", post(ptt::handle_ptt))
+        .route("/api/ptt/stream", post(ptt::handle_ptt_stream))
         .route("/api/ptt/greeting", post(ptt::get_greeting_handler))
         .route("/api/ptt/translate", post(ptt::translate_handler))
         .route("/api/ptt/health", get(ptt::ptt_health));

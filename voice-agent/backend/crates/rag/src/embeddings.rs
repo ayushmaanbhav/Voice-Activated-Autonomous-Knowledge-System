@@ -33,7 +33,8 @@ impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
             max_seq_len: 512,
-            embedding_dim: 384,
+            // P6 FIX: Default to 1024 to match qwen3-embedding:0.6b
+            embedding_dim: 1024,
             normalize: true,
             batch_size: 32,
             output_name: "last_hidden_state".to_string(),

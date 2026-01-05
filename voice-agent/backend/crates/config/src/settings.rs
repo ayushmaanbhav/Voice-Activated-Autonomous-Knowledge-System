@@ -674,8 +674,8 @@ fn default_qdrant_collection() -> String {
     "gold_loan_knowledge".to_string()
 }
 fn default_vector_dim() -> usize {
-    384
-} // e5-multilingual default
+    1024
+} // qwen3-embedding:0.6b (Ollama) produces 1024 dims
 fn default_dense_top_k() -> usize {
     20
 }

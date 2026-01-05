@@ -34,8 +34,8 @@ pub struct ConversationConfig {
 impl Default for ConversationConfig {
     fn default() -> Self {
         Self {
-            max_duration_seconds: 600, // 10 minutes
-            session_timeout_seconds: 60,
+            max_duration_seconds: 1800, // 30 minutes max conversation
+            session_timeout_seconds: 300, // 5 minutes inactivity timeout
             memory: MemoryConfig::default(),
             intent_detection: true,
             language: "en".to_string(),
