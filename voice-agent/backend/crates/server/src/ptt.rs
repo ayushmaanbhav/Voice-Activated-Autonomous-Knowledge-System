@@ -137,13 +137,78 @@ async fn transcribe_with_whisper(audio: &[f32], language: &str) -> Result<String
     Ok(text)
 }
 
+/// Strip markdown formatting for TTS output
+/// Removes headers (##), bold (**), italic (*), bullets, etc.
+fn strip_markdown_for_tts(text: &str) -> String {
+    let mut result = text.to_string();
+
+    // Remove headers (## Header)
+    result = regex::Regex::new(r"(?m)^#{1,6}\s*")
+        .unwrap()
+        .replace_all(&result, "")
+        .to_string();
+
+    // Remove bold (**text** or __text__)
+    result = regex::Regex::new(r"\*\*([^*]+)\*\*")
+        .unwrap()
+        .replace_all(&result, "$1")
+        .to_string();
+    result = regex::Regex::new(r"__([^_]+)__")
+        .unwrap()
+        .replace_all(&result, "$1")
+        .to_string();
+
+    // Remove italic (*text* or _text_) - bold (**) already removed above
+    // Simple pattern works since bold was already stripped
+    result = regex::Regex::new(r"\*([^*\n]+)\*")
+        .unwrap()
+        .replace_all(&result, "$1")
+        .to_string();
+
+    // Remove inline code (`code`)
+    result = regex::Regex::new(r"`([^`]+)`")
+        .unwrap()
+        .replace_all(&result, "$1")
+        .to_string();
+
+    // Remove bullet points (- item or * item) at start of lines
+    result = regex::Regex::new(r"(?m)^[\s]*[-*+]\s+")
+        .unwrap()
+        .replace_all(&result, "")
+        .to_string();
+
+    // Remove numbered lists (1. item)
+    result = regex::Regex::new(r"(?m)^\s*\d+\.\s+")
+        .unwrap()
+        .replace_all(&result, "")
+        .to_string();
+
+    // Remove links [text](url) -> text
+    result = regex::Regex::new(r"\[([^\]]+)\]\([^)]+\)")
+        .unwrap()
+        .replace_all(&result, "$1")
+        .to_string();
+
+    // Remove multiple newlines
+    result = regex::Regex::new(r"\n{3,}")
+        .unwrap()
+        .replace_all(&result, "\n\n")
+        .to_string();
+
+    // Trim whitespace
+    result.trim().to_string()
+}
+
 /// Call IndicF5 TTS HTTP service to synthesize speech
 async fn synthesize_with_tts(text: &str, language: &str) -> Result<(String, String), String> {
+    // Strip markdown formatting for cleaner TTS output
+    let clean_text = strip_markdown_for_tts(text);
+
     let client = reqwest::Client::new();
     let response = client
         .post(format!("{}/synthesize", TTS_SERVICE_URL))
         .json(&serde_json::json!({
-            "text": text,
+            "text": clean_text,
             "language": language
         }))
         .timeout(std::time::Duration::from_secs(120))
