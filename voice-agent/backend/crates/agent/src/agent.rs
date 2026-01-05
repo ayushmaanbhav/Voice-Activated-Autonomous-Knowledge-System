@@ -66,6 +66,8 @@ pub struct AgentConfig {
     pub dst_config: DstConfig,
     /// Phase 11: Agentic RAG configuration for multi-step retrieval
     pub agentic_rag: AgenticRagConfig,
+    /// Small model optimizations (auto-detected or manual)
+    pub small_model: SmallModelConfig,
 }
 
 /// P1 FIX: Configurable default values for tool calls
@@ -168,8 +170,125 @@ impl SpeculativeDecodingConfig {
     }
 }
 
+/// Small model optimization configuration
+///
+/// Configures optimizations for small language models (< 3B parameters)
+/// like Qwen2.5:1.5B, Llama3.2:1B, etc.
+///
+/// Research: Qwen2.5 Technical Report (arXiv:2412.15115) shows that small
+/// models benefit from reduced context windows and extractive compression.
+#[derive(Debug, Clone)]
+pub struct SmallModelConfig {
+    /// Enable small model optimizations (auto-detected from model name)
+    pub enabled: bool,
+    /// Context window size for small models (default: 2500)
+    pub context_window_tokens: usize,
+    /// High watermark for compression trigger (default: 2000)
+    pub high_watermark_tokens: usize,
+    /// Low watermark target after compression (default: 1500)
+    pub low_watermark_tokens: usize,
+    /// Use extractive compression instead of LLM summarization
+    pub use_extractive_compression: bool,
+    /// Disable LLM-based query rewriting in RAG
+    pub disable_llm_query_rewriting: bool,
+}
+
+impl Default for SmallModelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            context_window_tokens: 2500,
+            high_watermark_tokens: 2000,
+            low_watermark_tokens: 1500,
+            use_extractive_compression: true,
+            disable_llm_query_rewriting: true,
+        }
+    }
+}
+
+impl SmallModelConfig {
+    /// Create config for small models (enabled)
+    pub fn enabled() -> Self {
+        Self {
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create config for large models (disabled)
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+}
+
+/// Detect if a model name indicates a small model (< 3B parameters)
+///
+/// Recognizes common naming patterns:
+/// - Size suffixes: "1b", "1.5b", "2b", "3b"
+/// - Ollama tags: ":1b", ":1.5b", ":3b"
+/// - Full names: "qwen2.5:1.5b", "llama3.2:1b", "phi-3-mini"
+pub fn is_small_model(model_name: &str) -> bool {
+    let model_lower = model_name.to_lowercase();
+
+    // First check for large model patterns (must be checked first to avoid false positives)
+    // e.g., "72b" contains "2b", so we must check for large patterns first
+    let large_patterns = [
+        "7b", ":7b", "-7b",
+        "8b", ":8b", "-8b",
+        "13b", ":13b", "-13b",
+        "14b", ":14b", "-14b",
+        "32b", ":32b", "-32b",
+        "70b", ":70b", "-70b",
+        "72b", ":72b", "-72b",
+        "large", "xl",
+    ];
+    for pattern in &large_patterns {
+        if model_lower.contains(pattern) {
+            return false;
+        }
+    }
+
+    // Now check for small model patterns
+    let small_patterns = [
+        "0.5b", ":0.5b", "-0.5b",
+        "1b", ":1b", "-1b",
+        "1.5b", ":1.5b", "-1.5b",
+        "2b", ":2b", "-2b",
+        "3b", ":3b", "-3b",
+        "mini", "tiny", "small",
+        "phi-2", "phi-3-mini",
+    ];
+
+    for pattern in &small_patterns {
+        if model_lower.contains(pattern) {
+            return true;
+        }
+    }
+
+    // Default: not a small model
+    false
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
+        // Detect if default model is small
+        let default_model = "qwen2.5:1.5b-instruct-q4_K_M";
+        let is_small = is_small_model(default_model);
+
+        // Create small model config based on detection
+        let small_model = if is_small {
+            SmallModelConfig::enabled()
+        } else {
+            SmallModelConfig::disabled()
+        };
+
+        // Adjust context window based on model size
+        let context_tokens = if is_small {
+            small_model.context_window_tokens
+        } else {
+            4096
+        };
+
         Self {
             language: "en".to_string(),
             conversation: ConversationConfig::default(),
@@ -177,22 +296,22 @@ impl Default for AgentConfig {
             rag_enabled: true,
             tools_enabled: true,
             tool_defaults: ToolDefaults::default(),
-            // P2 FIX: Default context window for typical LLMs (Llama 3, etc.)
-            // 4096 tokens leaves room for response generation
-            context_window_tokens: 4096,
+            // Context window adjusted for small models (2500 vs 4096)
+            // Research: Qwen2.5 Technical Report (arXiv:2412.15115)
+            context_window_tokens: context_tokens,
             // P4 FIX: Default to conservative prefetch strategy
             rag_timing_strategy: RagTimingStrategy::default(),
             // P1-1 FIX: Default to Ollama for local development
-            // Can be overridden via config to use Claude, OpenAI, or Azure
             // P6 FIX: Use qwen2.5:1.5b-instruct-q4_K_M for better Hindi/English support
-            llm_provider: LlmProviderConfig::ollama("qwen2.5:1.5b-instruct-q4_K_M"),
+            llm_provider: LlmProviderConfig::ollama(default_model),
             // P1-2 FIX: Speculative decoding disabled by default
-            // Enable via config with speculative.enabled = true
             speculative: SpeculativeDecodingConfig::default(),
             // Phase 5: DST configuration
             dst_config: DstConfig::default(),
             // Phase 11: Agentic RAG enabled by default for multi-step retrieval
             agentic_rag: AgenticRagConfig::default(),
+            // Small model config (auto-detected)
+            small_model,
         }
     }
 }
@@ -201,6 +320,40 @@ impl AgentConfig {
     /// Get agent name from persona
     pub fn name(&self) -> &str {
         &self.persona.name
+    }
+
+    /// Check if small model optimizations are enabled
+    pub fn is_small_model(&self) -> bool {
+        self.small_model.enabled
+    }
+
+    /// Create config with specific model, auto-detecting small model settings
+    pub fn with_model(model_name: &str) -> Self {
+        let is_small = is_small_model(model_name);
+        let small_model = if is_small {
+            SmallModelConfig::enabled()
+        } else {
+            SmallModelConfig::disabled()
+        };
+        let context_tokens = if is_small {
+            small_model.context_window_tokens
+        } else {
+            4096
+        };
+
+        Self {
+            llm_provider: LlmProviderConfig::ollama(model_name),
+            context_window_tokens: context_tokens,
+            small_model,
+            ..Default::default()
+        }
+    }
+
+    /// Apply small model optimizations to an existing config
+    pub fn optimize_for_small_model(mut self) -> Self {
+        self.small_model = SmallModelConfig::enabled();
+        self.context_window_tokens = self.small_model.context_window_tokens;
+        self
     }
 }
 
@@ -2768,5 +2921,97 @@ mod tests {
         // After clear, still empty (no panic)
         agent.clear_prefetch_cache();
         assert!(agent.get_prefetch_results("test query").is_none());
+    }
+
+    // =========================================================================
+    // Small Model Detection Tests
+    // =========================================================================
+
+    #[test]
+    fn test_small_model_detection_qwen() {
+        // Qwen small models
+        assert!(is_small_model("qwen2.5:1.5b"));
+        assert!(is_small_model("qwen2.5:1.5b-instruct"));
+        assert!(is_small_model("qwen2.5:1.5b-instruct-q4_K_M"));
+        assert!(is_small_model("qwen2.5:0.5b"));
+        assert!(is_small_model("qwen2.5:3b"));
+
+        // Qwen large models
+        assert!(!is_small_model("qwen2.5:7b"));
+        assert!(!is_small_model("qwen2.5:14b"));
+        assert!(!is_small_model("qwen2.5:72b"));
+    }
+
+    #[test]
+    fn test_small_model_detection_llama() {
+        // Llama small models
+        assert!(is_small_model("llama3.2:1b"));
+        assert!(is_small_model("llama3.2:3b"));
+
+        // Llama large models
+        assert!(!is_small_model("llama3.2:7b"));
+        assert!(!is_small_model("llama3:8b"));
+        assert!(!is_small_model("llama3:70b"));
+    }
+
+    #[test]
+    fn test_small_model_detection_phi() {
+        // Phi small models
+        assert!(is_small_model("phi-2"));
+        assert!(is_small_model("phi-3-mini"));
+
+        // Other small model patterns
+        assert!(is_small_model("some-model-mini"));
+        assert!(is_small_model("tiny-llama"));
+    }
+
+    #[test]
+    fn test_small_model_detection_large() {
+        // Large models should not be detected as small
+        assert!(!is_small_model("claude-3-opus"));
+        assert!(!is_small_model("gpt-4"));
+        assert!(!is_small_model("mistral-7b"));
+        assert!(!is_small_model("mixtral-8x7b"));
+    }
+
+    #[test]
+    fn test_agent_config_default_is_small() {
+        // Default config uses qwen2.5:1.5b which is small
+        let config = AgentConfig::default();
+        assert!(config.is_small_model());
+        assert_eq!(config.context_window_tokens, 2500);
+        assert!(config.small_model.use_extractive_compression);
+        assert!(config.small_model.disable_llm_query_rewriting);
+    }
+
+    #[test]
+    fn test_agent_config_with_large_model() {
+        let config = AgentConfig::with_model("llama3:70b");
+        assert!(!config.is_small_model());
+        assert_eq!(config.context_window_tokens, 4096);
+    }
+
+    #[test]
+    fn test_agent_config_optimize_for_small() {
+        let config = AgentConfig {
+            context_window_tokens: 4096,
+            small_model: SmallModelConfig::disabled(),
+            ..Default::default()
+        };
+
+        let optimized = config.optimize_for_small_model();
+        assert!(optimized.is_small_model());
+        assert_eq!(optimized.context_window_tokens, 2500);
+    }
+
+    #[test]
+    fn test_small_model_config_values() {
+        let config = SmallModelConfig::enabled();
+        assert!(config.enabled);
+        assert_eq!(config.context_window_tokens, 2500);
+        assert_eq!(config.high_watermark_tokens, 2000);
+        assert_eq!(config.low_watermark_tokens, 1500);
+        assert!(config.use_extractive_compression);
+        assert!(config.disable_llm_query_rewriting);
     }
 }
