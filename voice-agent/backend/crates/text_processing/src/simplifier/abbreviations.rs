@@ -227,15 +227,16 @@ impl AbbreviationExpander {
         }
 
         let word_lower = word.to_lowercase();
-        let has_vowel = word_lower.chars().any(|c| "aeiou".contains(c));
+        let chars: Vec<char> = word_lower.chars().collect();
 
         // Must have at least one vowel
+        let has_vowel = chars.iter().any(|c| "aeiou".contains(*c));
         if !has_vowel {
             return false;
         }
 
         // Check for consonant clusters that are hard to pronounce
-        let bad_clusters = ["bcd", "cfg", "dgf", "fgh", "ghj", "hjk", "jkl", "klm"];
+        let bad_clusters = ["bcd", "cfg", "dgf", "fgh", "ghj", "hjk", "jkl", "klm", "ft", "xt"];
         for cluster in bad_clusters {
             if word_lower.contains(cluster) {
                 return false;
@@ -250,7 +251,32 @@ impl AbbreviationExpander {
             }
         }
 
-        // If has vowel and reasonable length, assume pronounceable
+        // Check vowel position - pronounceable words typically have vowels
+        // not at the very beginning followed by multiple consonants
+        let vowel_positions: Vec<usize> = chars
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| "aeiou".contains(**c))
+            .map(|(i, _)| i)
+            .collect();
+
+        // Need vowel in reasonable position (not just 2nd char with consonants after)
+        // Words like NEFT (vowel at pos 1, then FT) aren't pronounceable
+        if vowel_positions.len() == 1 {
+            let vpos = vowel_positions[0];
+            // If single vowel is early and followed by 2+ consonants, not pronounceable
+            if vpos == 1 && chars.len() > 3 {
+                let consonants_after: usize = chars[vpos + 1..]
+                    .iter()
+                    .filter(|c| !"aeiou".contains(**c))
+                    .count();
+                if consonants_after >= 2 {
+                    return false;
+                }
+            }
+        }
+
+        // If has vowel in reasonable position and length, assume pronounceable
         word.len() >= 3 && word.len() <= 5 && has_vowel
     }
 }

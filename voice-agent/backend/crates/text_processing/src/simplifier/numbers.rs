@@ -321,10 +321,14 @@ impl NumberToWords {
             let frac_str = format!("{:.2}", frac);
             let frac_part = &frac_str[2..]; // Skip "0."
 
+            // Strip trailing zeros to avoid "five zero" for 0.5
+            let frac_part = frac_part.trim_end_matches('0');
+
             let mut result = self.integer_to_words(whole);
             result.push_str(" point ");
 
             for c in frac_part.chars() {
+                // Skip leading zeros after "point" but keep interior zeros
                 if c != '0' || !result.ends_with("point ") {
                     result.push_str(self.digit_to_word(c));
                     result.push(' ');
