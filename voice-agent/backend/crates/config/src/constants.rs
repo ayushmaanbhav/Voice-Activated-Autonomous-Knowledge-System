@@ -105,19 +105,27 @@ pub mod timeouts {
 }
 
 /// RAG (Retrieval-Augmented Generation) defaults
+///
+/// P6 FIX: Optimized thresholds for 97-document knowledge base
+/// Tuned for small LLMs (qwen2.5:1.5b) with Hindi/English bilingual content
 pub mod rag {
     /// Weight for dense (semantic) search vs sparse (keyword) search
     /// Higher = more semantic, Lower = more keyword
-    pub const DENSE_WEIGHT: f64 = 0.7;
+    /// P6 FIX: Reduced from 0.7 to 0.65 for better Hindi/Hinglish keyword matching
+    pub const DENSE_WEIGHT: f64 = 0.65;
 
     /// Minimum similarity score to include a result
-    pub const MIN_SCORE: f64 = 0.4;
+    /// P6 FIX: Reduced from 0.4 to 0.35 for larger corpus coverage
+    /// With 97 docs, slightly lower threshold improves recall without hurting precision
+    pub const MIN_SCORE: f64 = 0.35;
 
     /// Confidence threshold for prefetching additional results
+    /// P6: Keep at 0.6 - good balance for speculative retrieval
     pub const PREFETCH_CONFIDENCE_THRESHOLD: f64 = 0.6;
 
     /// Default number of results to retrieve
-    pub const DEFAULT_TOP_K: usize = 5;
+    /// P6 FIX: Increased from 5 to 6 for better coverage with larger corpus
+    pub const DEFAULT_TOP_K: usize = 6;
 
     /// Default context tokens for small models (4K context window)
     /// P0-2 FIX: Updated from 2048 to match context.rs default
@@ -125,6 +133,28 @@ pub mod rag {
 
     /// Maximum context tokens for large models (32K+ context window)
     pub const MAX_CONTEXT_TOKENS_LARGE: usize = 32768;
+
+    // ==========================================================================
+    // P6 FIX: Additional thresholds for confusion matrix optimization
+    // ==========================================================================
+
+    /// Minimum average score for sufficiency check (agentic RAG)
+    /// Higher values reduce false positives but may require more iterations
+    pub const SUFFICIENCY_MIN_AVG_SCORE: f64 = 0.35;
+
+    /// Sufficiency threshold to stop query refinement
+    pub const SUFFICIENCY_THRESHOLD: f64 = 0.7;
+
+    /// Prefilter threshold for cascaded reranking
+    /// Docs below this keyword overlap score are skipped
+    pub const PREFILTER_THRESHOLD: f64 = 0.15;
+
+    /// Early termination threshold for reranker
+    /// P6: Lowered from 0.95 to 0.88 for faster exits with larger corpus
+    pub const EARLY_TERMINATION_THRESHOLD: f64 = 0.88;
+
+    /// Minimum high-confidence results before early termination
+    pub const EARLY_TERMINATION_MIN_RESULTS: usize = 2;
 }
 
 /// Audio processing defaults

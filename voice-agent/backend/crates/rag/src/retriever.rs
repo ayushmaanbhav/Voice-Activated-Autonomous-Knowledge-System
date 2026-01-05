@@ -504,7 +504,8 @@ mod tests {
     #[test]
     fn test_config_default() {
         let config = RetrieverConfig::default();
-        assert_eq!(config.final_top_k, 5);
+        // P6 FIX: Use centralized constant
+        assert_eq!(config.final_top_k, rag::DEFAULT_TOP_K);
         assert!(config.reranking_enabled);
     }
 

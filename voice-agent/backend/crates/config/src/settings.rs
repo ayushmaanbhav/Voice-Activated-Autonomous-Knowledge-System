@@ -683,7 +683,7 @@ fn default_sparse_top_k() -> usize {
     20
 }
 fn default_final_top_k() -> usize {
-    5
+    rag::DEFAULT_TOP_K
 }
 fn default_dense_weight() -> f32 {
     rag::DENSE_WEIGHT as f32
@@ -694,21 +694,22 @@ fn default_rrf_k() -> f32 {
 fn default_min_score() -> f32 {
     rag::MIN_SCORE as f32
 } // P1 FIX: Use centralized constant
+// P6 FIX: Use centralized constants for defaults
 fn default_prefilter_threshold() -> f32 {
-    0.15
-} // P5: Tuned for gold loan domain
+    rag::PREFILTER_THRESHOLD as f32
+}
 fn default_max_full_model_docs() -> usize {
     10
 }
 fn default_early_termination_threshold() -> f32 {
-    0.92
-} // P5: Slightly lower for faster exits
+    rag::EARLY_TERMINATION_THRESHOLD as f32
+}
 fn default_early_termination_min_results() -> usize {
-    3
+    rag::EARLY_TERMINATION_MIN_RESULTS
 }
 fn default_prefetch_confidence() -> f32 {
-    0.6
-} // P5: Lower for more aggressive prefetch
+    rag::PREFETCH_CONFIDENCE_THRESHOLD as f32
+}
 fn default_prefetch_top_k() -> usize {
     3
 }

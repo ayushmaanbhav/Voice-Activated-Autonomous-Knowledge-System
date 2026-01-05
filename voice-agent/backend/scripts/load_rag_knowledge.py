@@ -2,13 +2,16 @@
 """Load gold loan knowledge into Qdrant for RAG."""
 
 import json
+import os
 import requests
 import uuid
+import yaml
 
 QDRANT_URL = "http://localhost:6333"
 OLLAMA_URL = "http://localhost:11434"
 COLLECTION_NAME = "gold_loan_knowledge"
 EMBEDDING_MODEL = "qwen3-embedding:0.6b"
+KNOWLEDGE_DIR = os.path.join(os.path.dirname(__file__), "..", "knowledge")
 
 print(f"Using Ollama embedding model: {EMBEDDING_MODEL}")
 
@@ -260,6 +263,86 @@ def load_gold_loan_info():
 
     print(f"Loaded {len(documents)} product documents")
 
+def load_yaml_knowledge():
+    """Load knowledge from YAML files in knowledge/ directory."""
+    print("\nLoading YAML knowledge files...")
+
+    if not os.path.exists(KNOWLEDGE_DIR):
+        print(f"  Knowledge directory not found: {KNOWLEDGE_DIR}")
+        return 0
+
+    total_loaded = 0
+    yaml_files = [f for f in os.listdir(KNOWLEDGE_DIR)
+                  if f.endswith('.yaml') and f != 'manifest.yaml']
+
+    for fname in sorted(yaml_files):
+        fpath = os.path.join(KNOWLEDGE_DIR, fname)
+        try:
+            with open(fpath) as f:
+                data = yaml.safe_load(f)
+
+            docs = data.get('documents', [])
+            if not docs:
+                continue
+
+            for doc in docs:
+                doc_id = doc.get('id', '')
+                title = doc.get('title', '')
+                content = doc.get('content', '').strip()
+                category = doc.get('category', 'general')
+                language = doc.get('language', 'en')
+                keywords = doc.get('keywords', [])
+                segment_relevance = doc.get('segment_relevance', [])
+
+                # Create combined text for embedding
+                text = f"{title}\n\n{content}"
+
+                # Generate embedding
+                try:
+                    vector = generate_embedding(text)
+                except Exception as e:
+                    print(f"    Error embedding {doc_id}: {e}")
+                    continue
+
+                # Create payload
+                payload = {
+                    "id": doc_id,
+                    "text": text,
+                    "title": title,
+                    "content": content,
+                    "type": category,
+                    "category": category,
+                    "language": language,
+                    "keywords": keywords,
+                    "segment_relevance": segment_relevance,
+                    "source_file": fname
+                }
+
+                result = upsert_point(doc_id, vector, payload)
+                total_loaded += 1
+
+            print(f"  Loaded {len(docs)} docs from {fname}")
+
+        except Exception as e:
+            print(f"  Error loading {fname}: {e}")
+
+    print(f"Total YAML documents loaded: {total_loaded}")
+    return total_loaded
+
+
+def clear_collection():
+    """Clear all points from the collection."""
+    print("\nClearing existing collection...")
+    resp = requests.post(
+        f"{QDRANT_URL}/collections/{COLLECTION_NAME}/points/delete",
+        json={"filter": {}}  # Empty filter = delete all
+    )
+    if resp.status_code == 200:
+        print("  Collection cleared")
+    else:
+        print(f"  Warning: Could not clear collection: {resp.text}")
+
+
 def main():
     print("="*60)
     print("Loading Gold Loan Knowledge into Qdrant")
@@ -273,8 +356,13 @@ def main():
 
     print(f"Collection '{COLLECTION_NAME}' found")
 
+    # Clear existing data
+    clear_collection()
+
+    # Load all knowledge
     load_branches()
     load_gold_loan_info()
+    load_yaml_knowledge()
 
     # Verify
     resp = requests.get(f"{QDRANT_URL}/collections/{COLLECTION_NAME}")

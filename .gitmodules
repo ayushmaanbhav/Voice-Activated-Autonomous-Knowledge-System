@@ -20,3 +20,21 @@
 [submodule "voice-agent/backend/models/translation/indictrans2-indic-en"]
 	path = voice-agent/backend/models/translation/indictrans2-indic-en
 	url = git@hf.co:ai4bharat/indictrans2-indic-en-dist-200M
+[submodule "floneum"]
+	path = floneum
+	url = git@github.com:floneum/floneum.git
+[submodule "ort"]
+	path = ort
+	url = git@github.com:pykeio/ort.git
+[submodule "turn-rs"]
+	path = turn-rs
+	url = git@github.com:mycrl/turn-rs.git
+[submodule "voice-agent/backend/models/stt/hindi-quantized"]
+	path = voice-agent/backend/models/stt/hindi-quantized
+	url = https://github.com/deepanshu-yadav/Quantize_speech_Recognition_For_Hindi
+[submodule "voice-agent/backend/models/stt/whisper-medium"]
+	path = voice-agent/backend/models/stt/whisper-medium
+	url = git@hf.co:openai/whisper-medium
+[submodule "voice-agent/backend/models/stt/whisper-small"]
+	path = voice-agent/backend/models/stt/whisper-small
+	url = git@hf.co:openai/whisper-small

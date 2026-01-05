@@ -74,6 +74,9 @@ pub struct RerankerConfig {
 
 impl Default for RerankerConfig {
     fn default() -> Self {
+        // P6 FIX: Use centralized constants for consistency
+        use voice_agent_config::constants::rag;
+
         Self {
             strategy: ExitStrategy::Hybrid,
             confidence_threshold: 0.9,
@@ -81,12 +84,12 @@ impl Default for RerankerConfig {
             min_layer: 3,
             max_seq_len: 256,
             similarity_threshold: 0.95,
-            // Cascaded defaults
+            // Cascaded defaults - P6 FIX: Use centralized thresholds
             cascaded_enabled: true,
-            prefilter_threshold: 0.1, // Filter docs with <10% keyword overlap
+            prefilter_threshold: rag::PREFILTER_THRESHOLD as f32, // Filter low keyword overlap
             max_full_model_docs: 10,  // Only run model on top 10 candidates
-            early_termination_threshold: 0.95, // Stop if we find 95%+ confident match
-            early_termination_min_results: 3, // Need at least 3 good results first
+            early_termination_threshold: rag::EARLY_TERMINATION_THRESHOLD as f32,
+            early_termination_min_results: rag::EARLY_TERMINATION_MIN_RESULTS,
         }
     }
 }

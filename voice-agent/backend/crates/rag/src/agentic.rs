@@ -40,12 +40,15 @@ pub struct AgenticRagConfig {
 
 impl Default for AgenticRagConfig {
     fn default() -> Self {
+        // P6 FIX: Use centralized constants
+        use voice_agent_config::constants::rag;
+
         Self {
-            sufficiency_threshold: 0.7,
+            sufficiency_threshold: rag::SUFFICIENCY_THRESHOLD as f32,
             max_iterations: 3,
             enabled: true,
             initial_top_k: 10,
-            final_top_k: 5,
+            final_top_k: rag::DEFAULT_TOP_K,
         }
     }
 }
@@ -263,10 +266,13 @@ pub struct SufficiencyChecker {
 
 impl SufficiencyChecker {
     /// Create a new sufficiency checker
+    /// P6 FIX: Use centralized constants for consistency
     pub fn new() -> Self {
+        use voice_agent_config::constants::rag;
+
         Self {
             min_results: 1,
-            min_avg_score: 0.3,
+            min_avg_score: rag::SUFFICIENCY_MIN_AVG_SCORE as f32,
         }
     }
 
@@ -723,10 +729,14 @@ mod tests {
 
     #[test]
     fn test_config_default() {
+        use voice_agent_config::constants::rag;
+
         let config = AgenticRagConfig::default();
         assert_eq!(config.max_iterations, 3);
         assert!(config.enabled);
-        assert!((config.sufficiency_threshold - 0.7).abs() < 0.01);
+        // P6 FIX: Use centralized constant for expected value
+        assert!((config.sufficiency_threshold - rag::SUFFICIENCY_THRESHOLD as f32).abs() < 0.01);
+        assert_eq!(config.final_top_k, rag::DEFAULT_TOP_K);
     }
 
     #[test]
