@@ -19,8 +19,7 @@ use voice_agent_config::PersonaConfig;
 use voice_agent_tools::{ToolExecutor, ToolRegistry};
 // P1 FIX: Import RAG components for retrieval-augmented generation
 use voice_agent_rag::{
-    AgenticRagConfig, AgenticRetriever, AgenticSearchResult, HybridRetriever, QueryContext,
-    RerankerConfig, RetrieverConfig, SearchResult, VectorStore,
+    AgenticRagConfig, AgenticRetriever, QueryContext, SearchResult, VectorStore,
 };
 // P4 FIX: Import personalization engine for dynamic response adaptation
 use voice_agent_core::personalization::{PersonalizationContext, PersonalizationEngine};
@@ -35,9 +34,7 @@ use crate::dst::{DialogueStateTracker, DstConfig};
 use crate::lead_scoring::{
     EscalationTrigger, LeadRecommendation, LeadScore, LeadScoringEngine,
 };
-use crate::memory::{
-    AgenticMemory, AgenticMemoryConfig, ConversationTurn, TurnRole,
-};
+use crate::memory::{ConversationTurn, TurnRole};
 use crate::persuasion::PersuasionEngine;
 use crate::stage::{ConversationStage, RagTimingStrategy};
 use crate::AgentError;
@@ -280,9 +277,8 @@ pub struct GoldLoanAgent {
     /// P1-2 FIX: Speculative executor for low-latency generation
     /// Uses SLM for fast drafts, LLM for verification/improvement
     speculative: Option<Arc<SpeculativeExecutor>>,
-    /// MemGPT-style agentic memory system
-    /// Provides hierarchical memory: Core (human/persona) + Recall (FIFO) + Archival (long-term)
-    agentic_memory: AgenticMemory,
+    // NOTE: Agentic memory is now owned by Conversation to avoid desync issues.
+    // Use self.conversation.agentic_memory() to access it.
     /// Phase 5: Dialogue State Tracker for slot-based state management
     dialogue_state: RwLock<DialogueStateTracker>,
     /// Phase 10: Lead Scoring Engine for sales conversion optimization
@@ -298,10 +294,10 @@ impl GoldLoanAgent {
 
         let conversation = Arc::new(Conversation::new(&session_id, config.conversation.clone()));
 
-        // Create MemGPT-style agentic memory
-        let agentic_memory = AgenticMemory::new(AgenticMemoryConfig::default(), &session_id);
-        agentic_memory.core.set_persona_name(&config.persona.name);
-        agentic_memory.core.add_persona_goal(&format!(
+        // Configure the conversation's agentic memory with persona settings
+        // NOTE: We use conversation.agentic_memory() to avoid having two separate memory instances
+        conversation.agentic_memory().core.set_persona_name(&config.persona.name);
+        conversation.agentic_memory().core.add_persona_goal(&format!(
             "Represent Kotak Mahindra Bank as a Gold Loan Advisor with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
             config.persona.warmth * 100.0,
             config.persona.formality * 100.0,
@@ -356,7 +352,7 @@ impl GoldLoanAgent {
         // P1 FIX: Wire LLM to memory for real summarization
         if let Some(ref llm_backend) = llm {
             conversation.memory().set_llm(llm_backend.clone());
-            agentic_memory.set_llm(llm_backend.clone());
+            conversation.agentic_memory().set_llm(llm_backend.clone());
         }
 
         // P4 FIX: Initialize personalization engine and context
@@ -438,7 +434,6 @@ impl GoldLoanAgent {
             user_language,
             persuasion,
             speculative,
-            agentic_memory,
             dialogue_state: RwLock::new(DialogueStateTracker::with_config(dst_config)),
             lead_scoring: RwLock::new(lead_scoring),
         }
@@ -473,10 +468,10 @@ impl GoldLoanAgent {
 
         let conversation = Arc::new(Conversation::new(&session_id, config.conversation.clone()));
 
-        // Create MemGPT-style agentic memory
-        let agentic_memory = AgenticMemory::new(AgenticMemoryConfig::default(), &session_id);
-        agentic_memory.core.set_persona_name(&config.persona.name);
-        agentic_memory.core.add_persona_goal(&format!(
+        // Configure the conversation's agentic memory with persona settings
+        // NOTE: We use conversation.agentic_memory() to avoid having two separate memory instances
+        conversation.agentic_memory().core.set_persona_name(&config.persona.name);
+        conversation.agentic_memory().core.add_persona_goal(&format!(
             "Represent Kotak Mahindra Bank as a Gold Loan Advisor with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
             config.persona.warmth * 100.0,
             config.persona.formality * 100.0,
@@ -502,7 +497,7 @@ impl GoldLoanAgent {
 
         // P1 FIX: Wire LLM to memory for real summarization
         conversation.memory().set_llm(llm.clone());
-        agentic_memory.set_llm(llm.clone());
+        conversation.agentic_memory().set_llm(llm.clone());
 
         // P4 FIX: Initialize personalization engine and context
         let personalization = PersonalizationEngine::new();
@@ -549,7 +544,6 @@ impl GoldLoanAgent {
             user_language,
             persuasion,
             speculative,
-            agentic_memory,
             dialogue_state: RwLock::new(DialogueStateTracker::with_config(config.dst_config)),
             lead_scoring: RwLock::new(lead_scoring),
         }
@@ -562,10 +556,10 @@ impl GoldLoanAgent {
 
         let conversation = Arc::new(Conversation::new(&session_id, config.conversation.clone()));
 
-        // Create MemGPT-style agentic memory
-        let agentic_memory = AgenticMemory::new(AgenticMemoryConfig::default(), &session_id);
-        agentic_memory.core.set_persona_name(&config.persona.name);
-        agentic_memory.core.add_persona_goal(&format!(
+        // Configure the conversation's agentic memory with persona settings
+        // NOTE: We use conversation.agentic_memory() to avoid having two separate memory instances
+        conversation.agentic_memory().core.set_persona_name(&config.persona.name);
+        conversation.agentic_memory().core.add_persona_goal(&format!(
             "Represent Kotak Mahindra Bank as a Gold Loan Advisor with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
             config.persona.warmth * 100.0,
             config.persona.formality * 100.0,
@@ -618,7 +612,6 @@ impl GoldLoanAgent {
             user_language,
             persuasion,
             speculative: None, // P1-2 FIX: No speculative without LLM
-            agentic_memory,
             dialogue_state: RwLock::new(DialogueStateTracker::with_config(config.dst_config)),
             lead_scoring: RwLock::new(lead_scoring),
         }
@@ -909,7 +902,17 @@ impl GoldLoanAgent {
                     .collect(),
             )
             .with_stage(self.conversation.stage().display_name());
-        self.agentic_memory.add_turn(turn);
+        self.conversation.agentic_memory().add_turn(turn);
+
+        // Log memory state after adding turn (P0 FIX: diagnose hallucination)
+        let stats = self.conversation.agentic_memory().get_stats();
+        tracing::debug!(
+            role = "user",
+            fifo_tokens = stats.fifo_tokens,
+            core_tokens = stats.core_tokens,
+            total_turns = self.conversation.agentic_memory().get_recent_turns().len(),
+            "Added user turn to agentic memory"
+        );
 
         // Extract and store customer facts from intent slots in core memory
         for (key, slot) in &intent.slots {
@@ -929,7 +932,7 @@ impl GoldLoanAgent {
                     _ => None,
                 };
                 if let Some(k) = fact_key {
-                    let _ = self.agentic_memory.core_memory_append(k, value);
+                    let _ = self.conversation.agentic_memory().core_memory_append(k, value);
                 }
             }
         }
@@ -938,9 +941,16 @@ impl GoldLoanAgent {
         {
             let mut dst = self.dialogue_state.write();
             dst.update(&intent);
+
+            // Update conversation goal based on detected intent
+            let turn = dst.history().len();
+            dst.update_goal_from_intent(&intent.intent, turn);
+
             tracing::debug!(
                 primary_intent = ?dst.state().primary_intent(),
                 filled_slots = ?dst.state().filled_slots(),
+                conversation_goal = %dst.conversation_goal(),
+                goal_completion = dst.goal_completion(),
                 pending = ?dst.slots_needing_confirmation(),
                 "Dialogue state updated"
             );
@@ -1009,11 +1019,48 @@ impl GoldLoanAgent {
             )));
 
         // Check for tool calls based on intent
-        let tool_result = if self.config.tools_enabled {
+        let mut tool_result = if self.config.tools_enabled {
             self.maybe_call_tool(&intent).await?
         } else {
             None
         };
+
+        // Phase 12: Proactive tool triggering based on conversation goal
+        // If no tool was triggered by intent, check if we should trigger based on collected slots
+        if tool_result.is_none() && self.config.tools_enabled {
+            let proactive_tool = {
+                let dst = self.dialogue_state.read();
+                dst.should_trigger_tool()
+            };
+
+            if let Some(tool_name) = proactive_tool {
+                tracing::info!(
+                    tool = %tool_name,
+                    "Proactively triggering tool based on goal completion"
+                );
+                tool_result = self.call_tool_by_name(&tool_name, &intent).await?;
+            }
+        }
+
+        // Phase 12: Auto-capture lead when we have contact info (runs independently of main tool)
+        // This ensures we capture leads even when serving other goals like balance transfer
+        if self.config.tools_enabled {
+            let should_capture = {
+                let dst = self.dialogue_state.read();
+                dst.should_auto_capture_lead()
+            };
+
+            if should_capture {
+                tracing::info!("Auto-capturing lead with collected contact information");
+                // Fire-and-forget lead capture - don't wait for result or add to response
+                let lead_result = self.call_tool_by_name("capture_lead", &intent).await;
+                if let Ok(Some(_)) = lead_result {
+                    tracing::info!("Lead captured successfully");
+                } else {
+                    tracing::warn!("Auto lead capture failed or returned empty");
+                }
+            }
+        }
 
         // Build prompt for LLM (using English input for better LLM performance)
         // This is the "Think" part of Translate-Think-Translate
@@ -1059,7 +1106,17 @@ impl GoldLoanAgent {
         // Add to MemGPT-style agentic memory recall
         let assistant_turn = ConversationTurn::new(TurnRole::Assistant, &response)
             .with_stage(self.conversation.stage().display_name());
-        self.agentic_memory.add_turn(assistant_turn);
+        self.conversation.agentic_memory().add_turn(assistant_turn);
+
+        // Log memory state after adding assistant turn (P0 FIX: diagnose hallucination)
+        let stats = self.conversation.agentic_memory().get_stats();
+        tracing::debug!(
+            role = "assistant",
+            fifo_tokens = stats.fifo_tokens,
+            core_tokens = stats.core_tokens,
+            total_turns = self.conversation.agentic_memory().get_recent_turns().len(),
+            "Added assistant turn to agentic memory"
+        );
 
         // P1 FIX: Trigger memory summarization in background (non-blocking)
         // This uses the LLM (if available) to summarize conversation history
@@ -1081,8 +1138,8 @@ impl GoldLoanAgent {
         }
 
         // Check agentic memory compaction (MemGPT-style)
-        if self.agentic_memory.needs_compaction() {
-            let stats = self.agentic_memory.get_stats();
+        if self.conversation.agentic_memory().needs_compaction() {
+            let stats = self.conversation.agentic_memory().get_stats();
             tracing::debug!(
                 core_tokens = stats.core_tokens,
                 fifo_tokens = stats.fifo_tokens,
@@ -1364,14 +1421,41 @@ impl GoldLoanAgent {
         let stage = self.conversation.stage();
         let context_budget = stage.context_budget_tokens();
         let context = self.conversation.get_context_for_query(english_input, context_budget);
+
+        // Log memory context for debugging (P0 FIX: diagnose hallucination issues)
+        let memory_stats = self.conversation.agentic_memory().get_stats();
+        let recent_turns = self.conversation.agentic_memory().get_recent_turns();
+        tracing::debug!(
+            context_len = context.len(),
+            context_budget = context_budget,
+            core_tokens = memory_stats.core_tokens,
+            fifo_tokens = memory_stats.fifo_tokens,
+            archival_count = memory_stats.archival_count,
+            recent_turns_count = recent_turns.len(),
+            stage = ?stage,
+            "Memory context for LLM"
+        );
+
+        // Log the actual context being sent (truncated for readability)
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let context_preview = if context.len() > 500 {
+                format!("{}...[truncated {} chars]", &context[..500], context.len() - 500)
+            } else {
+                context.clone()
+            };
+            tracing::trace!(context = %context_preview, "Full memory context");
+        }
+
         if !context.is_empty() {
             builder = builder.with_context(&context);
         }
 
-        // Phase 5: Add DST state context for guided response generation
+        // Phase 5 + Phase 12: Add DST state context with goal tracking for guided response generation
         {
             let dst = self.dialogue_state.read();
             let dst_context = dst.state_context();
+
+            // Add collected customer information
             if !dst_context.is_empty() && dst_context != "No information collected yet." {
                 let dst_section = format!(
                     "## Collected Customer Information\n{}\n\n## Slots Needing Confirmation\n{}",
@@ -1385,18 +1469,17 @@ impl GoldLoanAgent {
                 builder = builder.with_context(&dst_section);
             }
 
-            // Add intent completeness info to guide next question
-            if let Some(primary_intent) = dst.state().primary_intent() {
-                let missing = dst.missing_slots_for_intent(primary_intent);
-                if !missing.is_empty() {
-                    let guidance = format!(
-                        "## Next Steps\nTo complete the {} flow, please collect: {}",
-                        primary_intent,
-                        missing.join(", ")
-                    );
-                    builder = builder.with_context(&guidance);
-                }
-            }
+            // Phase 12: Add conversation goal context with next best action
+            let goal_context = dst.goal_context();
+            builder = builder.with_context(&goal_context);
+
+            // Log goal tracking for debugging
+            tracing::debug!(
+                goal = %dst.conversation_goal(),
+                completion = dst.goal_completion(),
+                next_action = ?dst.get_next_action(),
+                "Goal context added to prompt"
+            );
         }
 
         // Phase 11: Add RAG context using Agentic RAG with multi-step retrieval
@@ -1415,7 +1498,7 @@ impl GoldLoanAgent {
                         prefetched
                     } else {
                         // Build query context for agentic retrieval
-                        let human_block = self.agentic_memory.core.human_snapshot();
+                        let human_block = self.conversation.agentic_memory().core.human_snapshot();
                         let query_context = QueryContext {
                             // Use conversation context as summary for query rewriting
                             summary: self.conversation.get_context(),
@@ -1729,6 +1812,144 @@ impl GoldLoanAgent {
         }
     }
 
+    /// Call a tool by name using DST state for arguments (Phase 12 - proactive tool triggering)
+    async fn call_tool_by_name(
+        &self,
+        tool_name: &str,
+        intent: &crate::intent::DetectedIntent,
+    ) -> Result<Option<String>, AgentError> {
+        let _ = self.event_tx.send(AgentEvent::ToolCall {
+            name: tool_name.to_string(),
+        });
+
+        // Build arguments from DST state (more complete than just current intent slots)
+        let mut args = serde_json::Map::new();
+
+        // First, add slots from the current intent
+        for (key, slot) in &intent.slots {
+            if let Some(ref value) = slot.value {
+                args.insert(key.clone(), serde_json::json!(value));
+            }
+        }
+
+        // Then, enrich with DST state values that may have been collected over multiple turns
+        {
+            let dst = self.dialogue_state.read();
+            let state = dst.state();
+
+            // Map DST slot names to tool argument names
+            if let Some(val) = state.customer_name() {
+                args.entry("customer_name".to_string()).or_insert(serde_json::json!(val));
+            }
+            if let Some(val) = state.phone_number() {
+                args.entry("phone_number".to_string()).or_insert(serde_json::json!(val));
+            }
+            if let Some(val) = state.location() {
+                args.entry("city".to_string()).or_insert(serde_json::json!(val));
+            }
+            if let Some(val) = state.gold_weight_grams() {
+                args.entry("gold_weight".to_string()).or_insert(serde_json::json!(val));
+            }
+            if let Some(val) = state.gold_purity() {
+                args.entry("gold_purity".to_string()).or_insert(serde_json::json!(val.to_string()));
+            }
+            if let Some(val) = state.loan_amount() {
+                args.entry("loan_amount".to_string()).or_insert(serde_json::json!(val));
+                args.entry("current_loan_amount".to_string()).or_insert(serde_json::json!(val));
+            }
+            if let Some(val) = state.current_lender() {
+                args.entry("current_lender".to_string()).or_insert(serde_json::json!(val));
+            }
+            if let Some(val) = state.current_interest_rate() {
+                args.entry("current_interest_rate".to_string()).or_insert(serde_json::json!(val));
+            }
+            if let Some(val) = state.loan_tenure() {
+                args.entry("remaining_tenure_months".to_string()).or_insert(serde_json::json!(val));
+            }
+        }
+
+        // Apply defaults based on tool type
+        let defaults = &self.config.tool_defaults;
+
+        if tool_name == "check_eligibility" && !args.contains_key("gold_purity") {
+            args.insert(
+                "gold_purity".to_string(),
+                serde_json::json!(&defaults.default_gold_purity),
+            );
+        }
+
+        if tool_name == "calculate_savings" {
+            if !args.contains_key("current_interest_rate") {
+                args.insert(
+                    "current_interest_rate".to_string(),
+                    serde_json::json!(defaults.default_competitor_rate),
+                );
+            }
+            if !args.contains_key("current_loan_amount") {
+                args.insert(
+                    "current_loan_amount".to_string(),
+                    serde_json::json!(defaults.default_loan_amount),
+                );
+            }
+            if !args.contains_key("remaining_tenure_months") {
+                args.insert(
+                    "remaining_tenure_months".to_string(),
+                    serde_json::json!(defaults.default_tenure_months),
+                );
+            }
+        }
+
+        if tool_name == "find_branches" && !args.contains_key("city") {
+            args.insert(
+                "city".to_string(),
+                serde_json::json!(&defaults.default_city),
+            );
+        }
+
+        if tool_name == "capture_lead" {
+            // Default interest level to High for proactive capture
+            if !args.contains_key("interest_level") {
+                args.insert("interest_level".to_string(), serde_json::json!("High"));
+            }
+        }
+
+        tracing::debug!(
+            tool = tool_name,
+            args = ?args,
+            "Calling tool proactively with DST state"
+        );
+
+        let result = self
+            .tools
+            .execute(tool_name, serde_json::Value::Object(args))
+            .await;
+
+        let success = result.is_ok();
+        let _ = self.event_tx.send(AgentEvent::ToolResult {
+            name: tool_name.to_string(),
+            success,
+        });
+
+        match result {
+            Ok(output) => {
+                let text = output
+                    .content
+                    .iter()
+                    .filter_map(|c| match c {
+                        voice_agent_tools::mcp::ContentBlock::Text { text } => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Ok(Some(text))
+            },
+            Err(e) => {
+                tracing::warn!("Proactive tool error: {}", e);
+                Ok(None)
+            },
+        }
+    }
+
     /// Generate response using LLM
     async fn generate_response(
         &self,
@@ -1789,7 +2010,7 @@ impl GoldLoanAgent {
                         prefetched
                     } else {
                         // Build query context for agentic retrieval
-                        let human_block = self.agentic_memory.core.human_snapshot();
+                        let human_block = self.conversation.agentic_memory().core.human_snapshot();
                         let query_context = QueryContext {
                             // Use conversation context as summary for query rewriting
                             summary: self.conversation.get_context(),
