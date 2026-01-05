@@ -331,14 +331,21 @@ pub async fn handle_ptt(
         let stt_guard = STT_INSTANCE.lock();
         let stt = stt_guard.as_ref().unwrap();
 
-        match stt.process(&pcm_f32) {
-            Ok(Some(result)) => result.text,
-            Ok(None) => String::new(),
-            Err(e) => {
-                tracing::error!("IndicConformer STT error: {}", e);
-                String::new()
-            }
+        // Process the audio chunks first
+        if let Err(e) = stt.process(&pcm_f32) {
+            tracing::error!("IndicConformer STT process error: {}", e);
         }
+
+        // For PTT (complete audio), we MUST call finalize() to get the transcript
+        // process() only returns partials during streaming, but PTT sends complete audio
+        let final_result = stt.finalize();
+        tracing::debug!(
+            text_len = final_result.text.len(),
+            confidence = final_result.confidence,
+            words = final_result.words.len(),
+            "IndicConformer finalized transcript"
+        );
+        final_result.text
     };
     metrics.stt_ms = stt_start.elapsed().as_millis() as u64;
 
@@ -996,14 +1003,22 @@ pub async fn handle_ptt_stream(
             }
             let stt_guard = STT_INSTANCE.lock();
             let stt = stt_guard.as_ref().unwrap();
-            match stt.process(&pcm_f32) {
-                Ok(Some(result)) => result.text,
-                Ok(None) => String::new(),
-                Err(e) => {
-                    tracing::error!("IndicConformer STT error: {}", e);
-                    String::new()
-                }
+
+            // Process the audio chunks first
+            if let Err(e) = stt.process(&pcm_f32) {
+                tracing::error!("IndicConformer STT process error: {}", e);
             }
+
+            // For PTT (complete audio), we MUST call finalize() to get the transcript
+            // process() only returns partials during streaming, but PTT sends complete audio
+            let final_result = stt.finalize();
+            tracing::debug!(
+                text_len = final_result.text.len(),
+                confidence = final_result.confidence,
+                words = final_result.words.len(),
+                "IndicConformer finalized transcript (streaming endpoint)"
+            );
+            final_result.text
         };
         metrics.stt_ms = stt_start.elapsed().as_millis() as u64;
 
