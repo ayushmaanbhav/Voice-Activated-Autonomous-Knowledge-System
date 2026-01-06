@@ -1,4 +1,4 @@
-<![CDATA[# Voice Agent Backend
+# Voice Agent Backend
 
 > Pure Rust Voice/Text/Chat Agent Backend
 
@@ -373,4 +373,3 @@ cargo run
 ## License
 
 Proprietary. See [LICENSE](../../LICENSE) for details.
-]]>

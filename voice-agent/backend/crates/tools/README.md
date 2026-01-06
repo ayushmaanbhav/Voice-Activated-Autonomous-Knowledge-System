@@ -1,4 +1,4 @@
-<![CDATA[# voice-agent-tools
+# voice-agent-tools
 
 > MCP-compatible tool interface with domain-specific tools
 
@@ -307,4 +307,3 @@ integrations:
     type: "google"
     # credentials via environment
 ```
-]]>

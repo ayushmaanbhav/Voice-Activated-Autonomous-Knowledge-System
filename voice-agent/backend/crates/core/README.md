@@ -1,4 +1,4 @@
-<![CDATA[# voice-agent-core
+# voice-agent-core
 
 > Foundation traits, types, and language support for the Voice Agent platform
 
@@ -222,4 +222,3 @@ impl SpeechToText for MySTTEngine {
 - `serde` - Serialization
 - `chrono` - Timestamps
 - `uuid` - Unique identifiers
-]]>

@@ -1,4 +1,4 @@
-<![CDATA[# voice-agent-rag
+# voice-agent-rag
 
 > Hybrid RAG with dense + sparse search, reranking, and agentic retrieval
 
@@ -370,4 +370,3 @@ rag:
 | RRF Fusion | 2ms | 1ms | Simple algorithm |
 | Reranking | 50ms | 20-50ms | With early exit |
 | **Total** | **97ms** | **~70ms** | Typical case |
-]]>

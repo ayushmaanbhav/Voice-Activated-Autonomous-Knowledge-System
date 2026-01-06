@@ -1,4 +1,4 @@
-<![CDATA[<div align="center">
+<div align="center">
 
 # 🎙️ VARTALAAP
 
@@ -1086,4 +1086,3 @@ This project is proprietary software. See [LICENSE](LICENSE) for details.
 *VARTALAAP - Where conversations happen without boundaries*
 
 </div>
-]]>

@@ -1,4 +1,4 @@
-<![CDATA[# voice-agent-agent
+# voice-agent-agent
 
 > Core conversational agent with dialogue state tracking, memory, and lead scoring
 
@@ -334,4 +334,3 @@ agent:
     hot_threshold: 75
     warm_threshold: 50
 ```
-]]>

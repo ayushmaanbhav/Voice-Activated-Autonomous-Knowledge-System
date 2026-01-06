@@ -1,4 +1,4 @@
-<![CDATA[# Voice Agent Module
+# Voice Agent Module
 
 > Complete Voice/Text/Chat Agent Application
 
@@ -318,4 +318,3 @@ Import the dashboard from `docs/grafana/voice-agent-dashboard.json`.
 ```bash
 RUST_LOG=voice_agent=debug,tower_http=debug cargo run
 ```
-]]>

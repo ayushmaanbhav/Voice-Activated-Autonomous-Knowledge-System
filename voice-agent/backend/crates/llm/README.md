@@ -1,4 +1,4 @@
-<![CDATA[# voice-agent-llm
+# voice-agent-llm
 
 > Multi-provider LLM integration with speculative execution
 
@@ -244,4 +244,3 @@ agent:
       - provider: "claude"
         model: "claude-3-haiku"
 ```
-]]>

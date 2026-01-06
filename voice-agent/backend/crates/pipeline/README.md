@@ -1,4 +1,4 @@
-<![CDATA[# voice-agent-pipeline
+# voice-agent-pipeline
 
 > Real-time audio processing pipeline: VAD → STT → Turn Detection → TTS
 
@@ -239,4 +239,3 @@ noise-suppression = ["nnnoiseless"]     # RNNoise
 | SmolLM2-135M | `models/turn_detection/smollm2.onnx` | 270MB | Turn detection |
 | IndicF5 | `models/tts/indicf5/` | 500MB | Indian TTS |
 | Piper | `models/tts/piper/` | 50MB | Fallback TTS |
-]]>
