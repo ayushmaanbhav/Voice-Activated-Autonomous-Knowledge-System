@@ -10,6 +10,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::ConfigError;
+use super::scoring::ScoringConfig;
+use super::slots::SlotsConfig;
+use super::stages::StagesConfig;
 
 /// Brand configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -127,6 +130,15 @@ pub struct MasterDomainConfig {
     /// High-value customer config
     #[serde(default)]
     pub high_value: HighValueConfig,
+    /// Slot definitions for DST (loaded from slots.yaml)
+    #[serde(skip)]
+    pub slots: SlotsConfig,
+    /// Stage definitions for conversation flow (loaded from stages.yaml)
+    #[serde(skip)]
+    pub stages: StagesConfig,
+    /// Lead scoring configuration (loaded from scoring.yaml)
+    #[serde(skip)]
+    pub scoring: ScoringConfig,
     /// Raw JSON for dynamic access
     #[serde(skip)]
     raw_config: Option<JsonValue>,
@@ -147,6 +159,9 @@ impl Default for MasterDomainConfig {
             competitors: HashMap::new(),
             products: HashMap::new(),
             high_value: HighValueConfig::default(),
+            slots: SlotsConfig::default(),
+            stages: StagesConfig::default(),
+            scoring: ScoringConfig::default(),
             raw_config: None,
         }
     }
@@ -197,6 +212,65 @@ impl MasterDomainConfig {
             .map_err(|e| ConfigError::ParseError(format!("Failed to parse merged config: {}", e)))?;
 
         config.raw_config = Some(merged);
+
+        // 5. Load slots configuration (optional)
+        let slots_path = config_dir.join(format!("domains/{}/slots.yaml", domain_id));
+        if slots_path.exists() {
+            match SlotsConfig::load(&slots_path) {
+                Ok(slots) => {
+                    tracing::info!(
+                        slots_count = slots.slots.len(),
+                        goals_count = slots.goals.len(),
+                        "Loaded slots configuration"
+                    );
+                    config.slots = slots;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load slots config: {}", e);
+                }
+            }
+        } else {
+            tracing::debug!("No slots config found at {:?}", slots_path);
+        }
+
+        // 6. Load stages configuration (optional)
+        let stages_path = config_dir.join(format!("domains/{}/stages.yaml", domain_id));
+        if stages_path.exists() {
+            match StagesConfig::load(&stages_path) {
+                Ok(stages) => {
+                    tracing::info!(
+                        stages_count = stages.stages.len(),
+                        initial_stage = %stages.initial_stage,
+                        "Loaded stages configuration"
+                    );
+                    config.stages = stages;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load stages config: {}", e);
+                }
+            }
+        } else {
+            tracing::debug!("No stages config found at {:?}", stages_path);
+        }
+
+        // 7. Load scoring configuration (optional)
+        let scoring_path = config_dir.join(format!("domains/{}/scoring.yaml", domain_id));
+        if scoring_path.exists() {
+            match ScoringConfig::load(&scoring_path) {
+                Ok(scoring) => {
+                    tracing::info!(
+                        high_value_threshold = %scoring.escalation.high_value_threshold,
+                        "Loaded scoring configuration"
+                    );
+                    config.scoring = scoring;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load scoring config: {}", e);
+                }
+            }
+        } else {
+            tracing::debug!("No scoring config found at {:?}", scoring_path);
+        }
 
         tracing::info!(
             domain_id = %config.domain_id,

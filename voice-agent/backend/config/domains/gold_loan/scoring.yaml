@@ -1,0 +1,107 @@
+# Gold Loan Domain - Lead Scoring Configuration
+# Defines thresholds, weights, and scoring rules
+
+# Qualification thresholds (score ranges for each level)
+qualification_thresholds:
+  cold: 0       # Score 0-29
+  warm: 30      # Score 30-59
+  hot: 60       # Score 60-79
+  qualified: 80 # Score 80+
+
+# Trust level scores
+trust_scores:
+  unknown: 0
+  low: 5
+  medium: 10
+  high: 15
+
+# Escalation triggers
+escalation:
+  max_objections: 3
+  max_stalled_turns: 5
+  high_value_threshold: 1000000  # 10 lakh in rupees
+
+# Category weights (multipliers for each score category)
+weights:
+  urgency: 1.0
+  engagement: 1.0
+  information: 1.0
+  intent: 1.0
+
+# Urgency scoring
+urgency:
+  has_signal_score: 10
+  keyword_score: 5
+  max_keywords: 3
+  max_score: 25
+  # Keywords by language
+  keywords:
+    en:
+      - urgent
+      - urgently
+      - immediately
+      - today
+      - now
+      - asap
+      - emergency
+    hi:
+      - jaldi
+      - abhi
+      - turant
+      - aaj
+      - foran
+
+# Engagement scoring
+engagement:
+  max_score: 25
+  per_turn_score: 3
+  max_turns: 5
+  per_question_score: 2
+  max_questions: 3
+  rates_inquiry_score: 3
+  comparison_score: 3
+
+# Information completeness scoring
+information:
+  max_score: 25
+  contact_info_score: 8
+  gold_details_score: 8
+  loan_amount_score: 5
+  specific_requirements_score: 4
+
+# Intent strength scoring
+intent:
+  max_score: 25
+  intent_to_proceed_score: 15
+  callback_request_score: 5
+  branch_visit_score: 8
+  # Trust score is added separately from trust_scores
+
+# Penalty scores (negative values)
+penalties:
+  disinterest: -15
+  competitor_preference: -10
+  human_request: -5
+  per_unresolved_objection: -3
+
+# Conversion probability multipliers
+conversion_multipliers:
+  unqualified: 0.5
+  mql: 0.8
+  sql: 1.2
+  intent_to_proceed: 1.2
+  disinterest: 0.3
+  max_probability: 0.95
+
+# MQL/SQL classification criteria
+classification:
+  sql_criteria:
+    # All conditions must be true
+    - has_urgency_signal: true
+    - provided_contact_info: true
+    - has_specific_requirements: true
+  mql_criteria:
+    # All conditions must be true
+    - min_engagement_turns: 3
+    # Any of these intents
+    - asked_about_rates_or_comparison: true

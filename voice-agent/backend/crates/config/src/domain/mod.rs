@@ -9,9 +9,22 @@
 //! raw config into crate-specific terminology.
 
 mod master;
+mod scoring;
+mod slots;
+mod stages;
 mod views;
 
 pub use master::MasterDomainConfig;
+pub use scoring::{
+    CategoryWeights, ConversionMultipliers, EscalationConfig, QualificationThresholds,
+    ScoringConfig, ScoringConfigError, TrustScores,
+};
+pub use slots::{
+    EnumValue, GoalDefinition, SlotDefinition, SlotType, SlotsConfig, SlotsConfigError,
+};
+pub use stages::{
+    StageDefinition, StageRequirements, StagesConfig, StagesConfigError, TransitionTrigger,
+};
 pub use views::{AgentDomainView, CompetitorInfo, LlmDomainView, ToolsDomainView};
 
 // Re-export legacy DomainConfig for backward compatibility

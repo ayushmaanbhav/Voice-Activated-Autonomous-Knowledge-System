@@ -5,6 +5,9 @@
 
 use std::sync::Arc;
 
+use super::scoring::{CategoryWeights, EscalationConfig, ScoringConfig};
+use super::slots::{GoalDefinition, SlotDefinition, SlotsConfig};
+use super::stages::{StageDefinition, StagesConfig, TransitionTrigger};
 use super::MasterDomainConfig;
 
 /// View for the agent crate
@@ -45,6 +48,189 @@ impl AgentDomainView {
     /// Get our rate for comparison
     pub fn our_rate_for_amount(&self, amount: f64) -> f64 {
         self.config.get_rate_for_amount(amount)
+    }
+
+    // ====== Slot Configuration ======
+
+    /// Get the full slots configuration
+    pub fn slots_config(&self) -> &SlotsConfig {
+        &self.config.slots
+    }
+
+    /// Get a slot definition by name
+    pub fn get_slot(&self, name: &str) -> Option<&SlotDefinition> {
+        self.config.slots.get_slot(name)
+    }
+
+    /// Get a goal definition by name
+    pub fn get_goal(&self, name: &str) -> Option<&GoalDefinition> {
+        self.config.slots.get_goal(name)
+    }
+
+    /// Map an intent to a goal
+    pub fn goal_for_intent(&self, intent: &str) -> Option<&str> {
+        self.config.slots.goal_for_intent(intent)
+    }
+
+    /// Get extraction patterns for a slot in a specific language
+    pub fn extraction_patterns(&self, slot_name: &str, language: &str) -> Vec<&str> {
+        self.config.slots.extraction_patterns(slot_name, language)
+    }
+
+    /// Get purity factor for a gold purity value
+    pub fn purity_factor(&self, purity_id: &str) -> f64 {
+        self.config.slots.purity_factor(purity_id)
+    }
+
+    /// Get typical rate for a lender (from slot enum values)
+    pub fn lender_rate(&self, lender_id: &str) -> Option<f64> {
+        self.config.slots.lender_rate(lender_id)
+    }
+
+    /// Get unit conversion factor (e.g., tola -> grams)
+    pub fn unit_conversion(&self, slot_name: &str, unit: &str) -> Option<f64> {
+        self.config.slots.unit_conversion(slot_name, unit)
+    }
+
+    /// Get required slots for a goal
+    pub fn required_slots_for_goal(&self, goal_name: &str) -> Vec<&str> {
+        self.config
+            .slots
+            .get_goal(goal_name)
+            .map(|g| g.required_slots.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get optional slots for a goal
+    pub fn optional_slots_for_goal(&self, goal_name: &str) -> Vec<&str> {
+        self.config
+            .slots
+            .get_goal(goal_name)
+            .map(|g| g.optional_slots.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get completion action for a goal
+    pub fn completion_action_for_goal(&self, goal_name: &str) -> Option<&str> {
+        self.config
+            .slots
+            .get_goal(goal_name)
+            .and_then(|g| g.completion_action.as_deref())
+    }
+
+    // ====== Stage Configuration ======
+
+    /// Get the full stages configuration
+    pub fn stages_config(&self) -> &StagesConfig {
+        &self.config.stages
+    }
+
+    /// Get a stage definition by ID
+    pub fn get_stage(&self, stage_id: &str) -> Option<&StageDefinition> {
+        self.config.stages.get_stage(stage_id)
+    }
+
+    /// Get the initial stage ID
+    pub fn initial_stage_id(&self) -> &str {
+        &self.config.stages.initial_stage
+    }
+
+    /// Get the initial stage definition
+    pub fn get_initial_stage(&self) -> Option<&StageDefinition> {
+        self.config.stages.get_initial_stage()
+    }
+
+    /// Get valid transitions from a stage
+    pub fn stage_transitions(&self, stage_id: &str) -> Vec<&str> {
+        self.config.stages.get_transitions(stage_id)
+    }
+
+    /// Check if a transition is valid
+    pub fn is_valid_stage_transition(&self, from: &str, to: &str) -> bool {
+        self.config.stages.is_valid_transition(from, to)
+    }
+
+    /// Get stage guidance text
+    pub fn stage_guidance(&self, stage_id: &str) -> Option<&str> {
+        self.config.stages.get_guidance(stage_id)
+    }
+
+    /// Get suggested questions for a stage
+    pub fn stage_questions(&self, stage_id: &str) -> Vec<&str> {
+        self.config.stages.get_suggested_questions(stage_id)
+    }
+
+    /// Get context budget for a stage (in tokens)
+    pub fn stage_context_budget(&self, stage_id: &str) -> usize {
+        self.config.stages.get_context_budget(stage_id)
+    }
+
+    /// Get RAG context fraction for a stage (0.0-1.0)
+    pub fn stage_rag_fraction(&self, stage_id: &str) -> f32 {
+        self.config.stages.get_rag_fraction(stage_id)
+    }
+
+    /// Get transition trigger for a stage
+    pub fn stage_trigger(&self, stage_id: &str) -> Option<&TransitionTrigger> {
+        self.config.stages.get_trigger(stage_id)
+    }
+
+    /// Get all stage IDs
+    pub fn all_stage_ids(&self) -> Vec<&str> {
+        self.config.stages.stage_ids()
+    }
+
+    // ====== Lead Scoring Configuration ======
+
+    /// Get the full scoring configuration
+    pub fn scoring_config(&self) -> &ScoringConfig {
+        &self.config.scoring
+    }
+
+    /// Get qualification level from score
+    pub fn qualification_level(&self, score: u32) -> &'static str {
+        self.config.scoring.qualification_level(score)
+    }
+
+    /// Get escalation configuration
+    pub fn escalation_config(&self) -> &EscalationConfig {
+        &self.config.scoring.escalation
+    }
+
+    /// Get max objections before escalation
+    pub fn max_objections_before_escalate(&self) -> u32 {
+        self.config.scoring.escalation.max_objections
+    }
+
+    /// Get max stalled turns before escalation
+    pub fn max_stalled_turns(&self) -> u32 {
+        self.config.scoring.escalation.max_stalled_turns
+    }
+
+    /// Get high-value loan threshold
+    pub fn high_value_loan_threshold(&self) -> f64 {
+        self.config.scoring.escalation.high_value_threshold
+    }
+
+    /// Get category weights for scoring
+    pub fn scoring_weights(&self) -> &CategoryWeights {
+        &self.config.scoring.weights
+    }
+
+    /// Get urgency keywords for a language
+    pub fn urgency_keywords(&self, language: &str) -> Vec<&str> {
+        self.config.scoring.urgency_keywords(language)
+    }
+
+    /// Get trust score for a level
+    pub fn trust_score(&self, level: &str) -> u32 {
+        self.config.scoring.trust_score(level)
+    }
+
+    /// Get qualification thresholds
+    pub fn qualification_thresholds(&self) -> (u32, u32, u32, u32) {
+        let t = &self.config.scoring.qualification_thresholds;
+        (t.cold, t.warm, t.hot, t.qualified)
     }
 }
 

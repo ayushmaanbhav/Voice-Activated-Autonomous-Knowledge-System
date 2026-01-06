@@ -1,0 +1,234 @@
+# Gold Loan Domain - Conversation Stages
+# Defines the sales conversation flow stages
+
+# Initial stage when conversation begins
+initial_stage: greeting
+
+# Stage definitions
+stages:
+  greeting:
+    display_name: "Greeting"
+    description: "Initial greeting and rapport building"
+    guidance: |
+      Warmly greet the customer. Introduce yourself as a Kotak Gold Loan specialist.
+      Build initial rapport before discussing products. Keep it brief and friendly.
+    suggested_questions:
+      - "How are you doing today?"
+      - "Is this a good time to talk?"
+      - "Thank you for your interest in Kotak Gold Loan!"
+    context_budget_tokens: 1024
+    rag_context_fraction: 0.0
+    history_turns_to_keep: 0
+    transitions:
+      - discovery
+      - farewell
+    requirements:
+      min_turns: 1
+      required_info: []
+      required_intents: []
+
+  discovery:
+    display_name: "Discovery"
+    description: "Understanding customer needs"
+    guidance: |
+      Ask open questions to understand their gold loan needs. Learn about:
+      - Current lender (if any)
+      - Loan amount they need
+      - Pain points with current setup
+      Focus on listening and gathering information.
+    suggested_questions:
+      - "Can you tell me about your current gold loan?"
+      - "What interest rate are you paying currently?"
+      - "How has your experience been with your current lender?"
+      - "What would make you consider switching?"
+    context_budget_tokens: 2048
+    rag_context_fraction: 0.15
+    history_turns_to_keep: 3
+    transitions:
+      - qualification
+      - presentation
+      - objection_handling
+      - farewell
+    requirements:
+      min_turns: 2
+      required_info:
+        - current_lender
+      required_intents: []
+
+  qualification:
+    display_name: "Qualification"
+    description: "Assessing eligibility and readiness"
+    guidance: |
+      Assess eligibility and readiness to switch. Understand:
+      - Timeline and urgency
+      - Decision-making process
+      - Gold weight and purity details
+    suggested_questions:
+      - "How much gold do you have pledged currently?"
+      - "When does your current loan come up for renewal?"
+      - "Are you the primary decision maker?"
+    context_budget_tokens: 2048
+    rag_context_fraction: 0.2
+    history_turns_to_keep: 4
+    transitions:
+      - presentation
+      - discovery
+      - farewell
+    requirements:
+      min_turns: 1
+      required_info:
+        - gold_weight_grams
+      required_intents: []
+
+  presentation:
+    display_name: "Presentation"
+    description: "Presenting product and benefits"
+    guidance: |
+      Present Kotak's gold loan benefits tailored to their needs:
+      - Competitive interest rates (starting from 10.49% p.a.)
+      - Up to 75% LTV
+      - Same day disbursement
+      - RBI-regulated bank security
+      Focus on rate savings and trust. Use tools to calculate savings.
+    suggested_questions:
+      - "Would you like to know how much you could save?"
+      - "Have you heard about our Switch & Save program?"
+      - "Can I calculate your potential monthly savings?"
+    context_budget_tokens: 3584
+    rag_context_fraction: 0.4
+    history_turns_to_keep: 5
+    transitions:
+      - objection_handling
+      - closing
+      - farewell
+    requirements:
+      min_turns: 1
+      required_info: []
+      required_intents: []
+
+  objection_handling:
+    display_name: "Objection Handling"
+    description: "Handling concerns and objections"
+    guidance: |
+      Address concerns with empathy and facts:
+      - Listen carefully to the objection
+      - Acknowledge their concern
+      - Provide relevant information
+      - Use social proof when appropriate
+      Don't be pushy. Build trust through transparency.
+    suggested_questions:
+      - "What concerns do you have about switching?"
+      - "Is there anything holding you back?"
+      - "What would help you feel more comfortable?"
+    context_budget_tokens: 3584
+    rag_context_fraction: 0.35
+    history_turns_to_keep: 6
+    transitions:
+      - presentation
+      - discovery
+      - closing
+      - farewell
+    requirements:
+      min_turns: 1
+      required_info: []
+      required_intents: []
+
+  closing:
+    display_name: "Closing"
+    description: "Moving towards commitment"
+    guidance: |
+      Summarize key benefits and guide to next steps:
+      - Recap the savings opportunity
+      - Offer to schedule a branch visit
+      - Or capture lead for follow-up
+      Be helpful and make next steps easy.
+    suggested_questions:
+      - "Would you like me to schedule a branch visit?"
+      - "Can I have someone call you with more details?"
+      - "Would you prefer to receive information via SMS?"
+    context_budget_tokens: 2560
+    rag_context_fraction: 0.2
+    history_turns_to_keep: 4
+    transitions:
+      - objection_handling
+      - farewell
+    requirements:
+      min_turns: 1
+      required_info: []
+      required_intents: []
+
+  farewell:
+    display_name: "Farewell"
+    description: "Wrapping up the conversation"
+    guidance: |
+      Thank warmly and confirm next steps:
+      - Summarize any commitments made
+      - Provide contact information if needed
+      - Leave door open for future conversations
+    suggested_questions:
+      - "Is there anything else I can help with?"
+      - "Do you have any other questions?"
+    context_budget_tokens: 1024
+    rag_context_fraction: 0.0
+    history_turns_to_keep: 2
+    transitions: []
+    requirements:
+      min_turns: 1
+      required_info: []
+      required_intents: []
+
+# Transition triggers - patterns that suggest moving to a stage
+transition_triggers:
+  discovery:
+    intents:
+      - loan_inquiry
+      - balance_transfer
+      - eligibility_inquiry
+    patterns:
+      - "(?i)current.*loan"
+      - "(?i)paying.*interest"
+      - "(?i)muthoot|manappuram|iifl"
+
+  qualification:
+    intents:
+      - eligibility_check
+    patterns:
+      - "(?i)how\\s+much.*gold"
+      - "(?i)eligible"
+      - "(?i)qualify"
+
+  presentation:
+    intents:
+      - product_inquiry
+    patterns:
+      - "(?i)tell.*about.*kotak"
+      - "(?i)your.*rate"
+      - "(?i)what.*offer"
+
+  objection_handling:
+    intents:
+      - objection
+      - concern
+    patterns:
+      - "(?i)but\\s+"
+      - "(?i)worried|concerned|hesitant"
+      - "(?i)not\\s+sure"
+
+  closing:
+    intents:
+      - interested
+      - callback_request
+      - appointment_request
+    patterns:
+      - "(?i)interested"
+      - "(?i)schedule|appointment|visit"
+      - "(?i)call\\s+me"
+
+  farewell:
+    intents:
+      - goodbye
+      - end_conversation
+    patterns:
+      - "(?i)thank.*bye"
+      - "(?i)good.*bye"
+      - "(?i)talk.*later"

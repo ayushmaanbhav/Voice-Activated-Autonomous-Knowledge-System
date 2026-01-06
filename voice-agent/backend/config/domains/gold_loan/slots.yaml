@@ -1,0 +1,340 @@
+# Gold Loan Domain - Slot Definitions
+# These define the dialogue state tracking slots for the gold loan agent
+
+# Slot type definitions
+slots:
+  # Customer information slots
+  customer_name:
+    type: string
+    description: "Customer's full name"
+    extraction_patterns:
+      en:
+        - "(?i)(?:my\\s+name\\s+is|i\\s+am|i'm|this\\s+is|call\\s+me)\\s+([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*)"
+        - "(?i)(?:myself|name[:\\s]+)\\s*([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*)"
+      hi:
+        - "(?i)(?:mera\\s+)?(?:naam|name)\\s+([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]*)?)\\s+(?:hai|h)\\b"
+        - "(?i)(?:mera\\s+)?(?:naam|name)\\s+([A-Z][a-zA-Z]+)"
+
+  phone_number:
+    type: string
+    description: "10-digit Indian mobile number"
+    validation: "^[6-9]\\d{9}$"
+    extraction_patterns:
+      en:
+        - "\\b([6-9]\\d{9})\\b"
+        - "(?:\\+91|91)?[-\\s]?([6-9]\\d{9})\\b"
+
+  location:
+    type: string
+    description: "City or area"
+    extraction_patterns:
+      en:
+        - "(?i)(?:from|in|at|near|around)\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)?)"
+        - "(?i)(?:live|stay|reside)\\s+(?:in|at)\\s+([A-Z][a-z]+)"
+      hi:
+        - "(?i)(?:se|mein|me)\\s+([A-Z][a-z]+)"
+
+  pincode:
+    type: string
+    description: "6-digit Indian PIN code"
+    validation: "^[1-9]\\d{5}$"
+    extraction_patterns:
+      en:
+        - "\\b([1-9]\\d{5})\\b"
+        - "(?i)(?:pincode|pin)\\s*(?:is|hai)?\\s*(\\d{6})"
+
+  # Gold details slots
+  gold_weight_grams:
+    type: number
+    description: "Weight of gold in grams"
+    min: 1
+    max: 10000
+    extraction_patterns:
+      en:
+        - "(?i)(\\d+(?:\\.\\d+)?)\\s*(?:grams?|gm|g)"
+        - "(?i)(\\d+(?:\\.\\d+)?)\\s*(?:tola)"
+      hi:
+        - "(?i)(\\d+(?:\\.\\d+)?)\\s*(?:ग्राम)"
+        - "(?i)(\\d+(?:\\.\\d+)?)\\s*(?:तोला)"
+    unit_conversions:
+      tola: 11.66
+      तोला: 11.66
+
+  gold_purity:
+    type: enum
+    description: "Gold purity in karats"
+    values:
+      - id: K24
+        display: "24 karat"
+        purity_factor: 0.999
+        patterns: ["24k", "24 karat", "24kt", "pure gold"]
+      - id: K22
+        display: "22 karat"
+        purity_factor: 0.916
+        patterns: ["22k", "22 karat", "22kt", "standard gold"]
+      - id: K18
+        display: "18 karat"
+        purity_factor: 0.750
+        patterns: ["18k", "18 karat", "18kt"]
+      - id: K14
+        display: "14 karat"
+        purity_factor: 0.583
+        patterns: ["14k", "14 karat", "14kt"]
+    default: K22
+
+  gold_item_type:
+    type: enum
+    description: "Type of gold item"
+    values:
+      - id: jewelry
+        display: "Jewelry"
+        patterns: ["jewelry", "jewellery", "ornaments", "chain", "necklace", "bangles", "ring"]
+      - id: coins
+        display: "Gold Coins"
+        patterns: ["coins", "coin", "gold coin"]
+      - id: bars
+        display: "Gold Bars"
+        patterns: ["bars", "bar", "biscuit"]
+
+  # Loan requirement slots
+  loan_amount:
+    type: number
+    description: "Desired loan amount in INR"
+    min: 10000
+    max: 25000000
+    extraction_patterns:
+      en:
+        - "(?i)(\\d+(?:\\.\\d+)?)\\s*(?:crore|cr)"
+        - "(?i)(\\d+(?:\\.\\d+)?)\\s*(?:lakh|lac)"
+        - "(?i)(\\d+(?:\\.\\d+)?)\\s*(?:thousand|k)"
+        - "(?:₹|rs\\.?|rupees?)\\s*(\\d+(?:,\\d+)*)"
+      hi:
+        - "(?i)(\\d+(?:\\.\\d+)?)\\s*(?:करोड़)"
+        - "(?i)(\\d+(?:\\.\\d+)?)\\s*(?:लाख)"
+        - "(?i)(\\d+(?:\\.\\d+)?)\\s*(?:हज़ार|hazar)"
+    unit_conversions:
+      crore: 10000000
+      cr: 10000000
+      करोड़: 10000000
+      lakh: 100000
+      lac: 100000
+      लाख: 100000
+      thousand: 1000
+      k: 1000
+      हज़ार: 1000
+      hazar: 1000
+
+  loan_purpose:
+    type: enum
+    description: "Purpose of the loan"
+    values:
+      - id: business
+        display: "Business"
+        patterns: ["business", "shop", "व्यापार", "dukaan"]
+      - id: medical
+        display: "Medical"
+        patterns: ["medical", "hospital", "treatment", "health", "इलाज"]
+      - id: education
+        display: "Education"
+        patterns: ["education", "school", "college", "fees", "पढ़ाई"]
+      - id: wedding
+        display: "Wedding"
+        patterns: ["wedding", "marriage", "shaadi", "शादी"]
+      - id: personal
+        display: "Personal"
+        patterns: ["personal", "emergency", "urgent"]
+
+  loan_tenure:
+    type: number
+    description: "Loan tenure in months"
+    min: 1
+    max: 36
+    extraction_patterns:
+      en:
+        - "(?i)(\\d+)\\s*(?:months?|month)"
+        - "(?i)(\\d+)\\s*(?:years?|year)"
+      hi:
+        - "(?i)(\\d+)\\s*(?:महीने|महीना)"
+        - "(?i)(\\d+)\\s*(?:साल)"
+    unit_conversions:
+      year: 12
+      years: 12
+      साल: 12
+
+  urgency:
+    type: enum
+    description: "Urgency level"
+    values:
+      - id: immediate
+        display: "Immediate"
+        patterns: ["urgent", "today", "now", "immediately", "abhi", "turant", "aaj", "emergency"]
+      - id: soon
+        display: "Soon"
+        patterns: ["this week", "few days", "jaldi", "soon", "is hafte"]
+      - id: planning
+        display: "Planning"
+        patterns: ["next month", "planning", "thinking", "soch", "agle mahine"]
+      - id: exploring
+        display: "Exploring"
+        patterns: ["just checking", "exploring", "options", "jaankari", "information"]
+
+  # Existing loan slots (for balance transfer)
+  current_lender:
+    type: enum
+    description: "Current lender name"
+    values:
+      - id: muthoot
+        display: "Muthoot Finance"
+        patterns: ["muthoot", "muthut", "muthoot finance"]
+        typical_rate: 18.0
+      - id: manappuram
+        display: "Manappuram"
+        patterns: ["manappuram", "manapuram", "manappuram gold"]
+        typical_rate: 19.0
+      - id: iifl
+        display: "IIFL"
+        patterns: ["iifl", "india infoline"]
+        typical_rate: 17.0
+      - id: hdfc
+        display: "HDFC Bank"
+        patterns: ["hdfc", "hdfc bank"]
+        typical_rate: 10.5
+      - id: sbi
+        display: "SBI"
+        patterns: ["sbi", "state bank"]
+        typical_rate: 9.85
+      - id: icici
+        display: "ICICI Bank"
+        patterns: ["icici", "icici bank"]
+        typical_rate: 10.0
+      - id: axis
+        display: "Axis Bank"
+        patterns: ["axis", "axis bank"]
+        typical_rate: 10.5
+      - id: federal
+        display: "Federal Bank"
+        patterns: ["federal", "federal bank"]
+        typical_rate: 10.49
+
+  current_outstanding:
+    type: number
+    description: "Current outstanding loan amount"
+    min: 0
+    max: 100000000
+
+  current_interest_rate:
+    type: number
+    description: "Current interest rate percentage"
+    min: 0
+    max: 50
+
+  # Scheduling slots
+  preferred_date:
+    type: date
+    description: "Preferred appointment date"
+    extraction_patterns:
+      en:
+        - "(?i)(\\d{1,2})[/-](\\d{1,2})[/-](\\d{2,4})"
+        - "(?i)(today|tomorrow|next week)"
+        - "(?i)(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+
+  preferred_time:
+    type: enum
+    description: "Preferred time slot"
+    values:
+      - id: morning
+        display: "Morning (10-12)"
+        patterns: ["morning", "subah", "10", "11", "12"]
+      - id: afternoon
+        display: "Afternoon (12-3)"
+        patterns: ["afternoon", "dopahar", "12", "1", "2", "3"]
+      - id: evening
+        display: "Evening (3-5)"
+        patterns: ["evening", "shaam", "3", "4", "5"]
+
+  preferred_branch:
+    type: string
+    description: "Preferred branch location"
+
+# Conversation goals
+goals:
+  exploration:
+    description: "Just exploring/gathering information"
+    required_slots: []
+    optional_slots: []
+
+  balance_transfer:
+    description: "Transfer existing loan from another lender"
+    required_slots:
+      - current_lender
+      - loan_amount
+    optional_slots:
+      - current_interest_rate
+      - gold_weight_grams
+      - gold_purity
+    completion_action: calculate_savings
+
+  new_loan:
+    description: "New gold loan application"
+    required_slots:
+      - gold_weight_grams
+      - loan_amount
+    optional_slots:
+      - gold_purity
+      - loan_purpose
+      - loan_tenure
+    completion_action: check_eligibility
+
+  eligibility_check:
+    description: "Check loan eligibility"
+    required_slots:
+      - gold_weight_grams
+    optional_slots:
+      - gold_purity
+      - loan_amount
+    completion_action: check_eligibility
+
+  branch_visit:
+    description: "Schedule branch visit"
+    required_slots:
+      - location
+    optional_slots:
+      - preferred_date
+      - preferred_time
+      - customer_name
+      - phone_number
+    completion_action: find_branches
+
+  lead_capture:
+    description: "Capture lead for follow-up"
+    required_slots:
+      - customer_name
+      - phone_number
+    optional_slots:
+      - location
+      - loan_amount
+    completion_action: capture_lead
+
+# Intent to goal mapping
+intent_mapping:
+  balance_transfer:
+    - balance_transfer
+    - switch_lender
+    - loan_transfer
+  eligibility_check:
+    - eligibility_inquiry
+    - eligibility_check
+  new_loan:
+    - new_loan
+    - loan_inquiry
+    - gold_loan
+  branch_visit:
+    - branch_inquiry
+    - find_branch
+    - schedule_visit
+    - appointment_request
+  lead_capture:
+    - callback_request
+    - capture_lead
+    - interested
+    - sms_request
