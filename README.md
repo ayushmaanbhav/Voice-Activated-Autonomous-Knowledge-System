@@ -141,7 +141,7 @@ graph TB
     subgraph Client[Client Layer]
         WEB[Web Browser]
         MOB[Mobile App]
-        TEL[Telephony/SIP]
+        TEL[Telephony]
         API[REST API]
     end
 
@@ -152,11 +152,11 @@ graph TB
     end
 
     subgraph Pipeline[Core Pipeline]
-        VAD[Voice Activity Detection]
-        STT[Speech-to-Text]
-        NLU[Text Processing]
-        AGENT[Agent Core]
-        TTS[Text-to-Speech]
+        VAD[VAD]
+        STT[STT]
+        NLU[NLU]
+        AGENT[Agent]
+        TTS[TTS]
     end
 
     subgraph Intelligence[Intelligence Layer]
@@ -868,27 +868,27 @@ pub trait Retriever: Send + Sync + 'static {
 graph LR
     subgraph QueryProc[Query Processing]
         Q[User Query] --> QE[Query Expansion]
-        QE --> CL[Cross-Lingual Norm]
+        QE --> CL[Normalize]
     end
 
     subgraph Retrieval[Parallel Retrieval]
-        CL --> DS[Dense: Qdrant]
-        CL --> SS[Sparse: Tantivy]
+        CL --> DS[Dense Search]
+        CL --> SS[Sparse Search]
     end
 
     subgraph Ranking[Fusion and Ranking]
         DS --> RRF[RRF Fusion]
         SS --> RRF
-        RRF --> RR[Cross-Encoder Rerank]
-        RR --> EE{Early Exit?}
-        EE -->|Yes| OUT[Top-K Results]
+        RRF --> RR[Reranker]
+        RR --> EE{Exit}
+        EE -->|Yes| OUT[Results]
         EE -->|No| RR
     end
 
     subgraph Context[Context Management]
-        OUT --> CS[Stage-Based Sizing]
-        CS --> CC[Compression]
-        CC --> LLM[To LLM]
+        OUT --> CS[Sizing]
+        CS --> CC[Compress]
+        CC --> LLM[LLM]
     end
 ```
 
