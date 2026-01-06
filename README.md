@@ -4,7 +4,7 @@
 
 <br/>
 
-<video src="https://github.com/ayushmaanbhav/ai-rag-voice-sales-agent/raw/main/VAAK__Sovereign_Voice_Agent.mp4" width="720" controls></video>
+[![VAAK Demo](https://img.shields.io/badge/▶%20Watch%20Demo-VAAK%20Voice%20Agent-red?style=for-the-badge&logo=youtube)](https://photos.google.com/photo/AF1QipOsyWA3XoS-RiueCLFjBvd2_HF1MaWefoj8_ITo)
 
 # VAAK (वाक्)
 
