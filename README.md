@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🔊 VAAK (वाक्)
+<img src="assets/vaak-logo.svg" alt="VAAK Logo" width="600"/>
+
+# VAAK (वाक्)
 
 ### **Voice-Activated Autonomous Knowledge System**
 
