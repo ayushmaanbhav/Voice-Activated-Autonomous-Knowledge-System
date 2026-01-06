@@ -26,172 +26,177 @@
   <!-- Dark background -->
   <rect width="600" height="500" fill="#0a0a12"/>
 
-  <!-- Rotating egg-shaped taglines group -->
+  <!-- Rotating wavy taglines group -->
+  <!-- Using r = 185 + 20*sin(4θ) for wobbly wave pattern -->
   <g transform="translate(300,250)">
     <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="24s" repeatCount="indefinite" additive="sum"/>
 
-    <!-- 16 taglines, each pulses when at 90° or 270° position -->
-    <!-- Pulse timing: 24s rotation / 16 positions = 1.5s per slot -->
-    <!-- Each tagline pulses at t=(90-θ)/360*24 and t=(270-θ)/360*24 -->
+    <!-- 16 taglines with sinusoidal wobble positioning -->
+    <!-- Base: 185, Peak: 205, Valley: 165 -->
 
-    <!-- 0° - AIR-GAPPED: pulses at 6s (reaches 90°) and 18s (reaches 270°) -->
-    <g transform="rotate(0) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#06b6d4" letter-spacing="1">
+    <!-- 0° - r=185 -->
+    <g transform="rotate(0) translate(0,-185)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#06b6d4" letter-spacing="1">
         AIR-GAPPED
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite"/>
       </text>
     </g>
 
-    <!-- 22.5° - MEMORY-SAFE -->
-    <g transform="rotate(22.5) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#8b5cf6" letter-spacing="1">
+    <!-- 22.5° - r=205 PEAK -->
+    <g transform="rotate(22.5) translate(0,-205)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#8b5cf6" letter-spacing="1">
         MEMORY-SAFE
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-1.5s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-1.5s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-1.5s"/>
       </text>
     </g>
 
-    <!-- 45° - DETERMINISTIC -->
-    <g transform="rotate(45) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#ec4899" letter-spacing="1">
+    <!-- 45° - r=185 -->
+    <g transform="rotate(45) translate(0,-185)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#ec4899" letter-spacing="1">
         DETERMINISTIC
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-3s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-3s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-3s"/>
       </text>
     </g>
 
-    <!-- 67.5° - REAL-TIME -->
-    <g transform="rotate(67.5) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#f59e0b" letter-spacing="1">
+    <!-- 67.5° - r=165 VALLEY -->
+    <g transform="rotate(67.5) translate(0,-165)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#f59e0b" letter-spacing="1">
         REAL-TIME
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-4.5s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-4.5s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-4.5s"/>
       </text>
     </g>
 
-    <!-- 90° - SUB-500MS (starts at right, immediately active) -->
-    <g transform="rotate(90) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#10b981" letter-spacing="1">
+    <!-- 90° - r=185 -->
+    <g transform="rotate(90) translate(0,-185)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#10b981" letter-spacing="1">
         SUB-500MS
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-6s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-6s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-6s"/>
       </text>
     </g>
 
-    <!-- 112.5° - EDGE AI -->
-    <g transform="rotate(112.5) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#06b6d4" letter-spacing="1">
+    <!-- 112.5° - r=205 PEAK -->
+    <g transform="rotate(112.5) translate(0,-205)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#06b6d4" letter-spacing="1">
         EDGE AI
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-7.5s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-7.5s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-7.5s"/>
       </text>
     </g>
 
-    <!-- 135° - GDPR-READY -->
-    <g transform="rotate(135) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#8b5cf6" letter-spacing="1">
+    <!-- 135° - r=185 -->
+    <g transform="rotate(135) translate(0,-185)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#8b5cf6" letter-spacing="1">
         GDPR-READY
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-9s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-9s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-9s"/>
       </text>
     </g>
 
-    <!-- 157.5° - DATA SOVEREIGN -->
-    <g transform="rotate(157.5) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#ec4899" letter-spacing="1">
+    <!-- 157.5° - r=165 VALLEY -->
+    <g transform="rotate(157.5) translate(0,-165)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#ec4899" letter-spacing="1">
         DATA SOVEREIGN
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-10.5s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-10.5s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-10.5s"/>
       </text>
     </g>
 
-    <!-- 180° - COMPLIANT -->
-    <g transform="rotate(180) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#f59e0b" letter-spacing="1">
+    <!-- 180° - r=185 -->
+    <g transform="rotate(180) translate(0,-185)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#f59e0b" letter-spacing="1">
         COMPLIANT
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-12s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-12s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-12s"/>
       </text>
     </g>
 
-    <!-- 202.5° - DISTRIBUTED -->
-    <g transform="rotate(202.5) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#10b981" letter-spacing="1">
+    <!-- 202.5° - r=205 PEAK -->
+    <g transform="rotate(202.5) translate(0,-205)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#10b981" letter-spacing="1">
         DISTRIBUTED
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-13.5s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-13.5s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-13.5s"/>
       </text>
     </g>
 
-    <!-- 225° - SCALABLE -->
-    <g transform="rotate(225) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#06b6d4" letter-spacing="1">
+    <!-- 225° - r=185 -->
+    <g transform="rotate(225) translate(0,-185)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#06b6d4" letter-spacing="1">
         SCALABLE
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-15s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-15s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-15s"/>
       </text>
     </g>
 
-    <!-- 247.5° - ENTERPRISE -->
-    <g transform="rotate(247.5) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#8b5cf6" letter-spacing="1">
+    <!-- 247.5° - r=165 VALLEY -->
+    <g transform="rotate(247.5) translate(0,-165)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#8b5cf6" letter-spacing="1">
         ENTERPRISE
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-16.5s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-16.5s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-16.5s"/>
       </text>
     </g>
 
-    <!-- 270° - 22 LANGUAGES (starts at left, immediately active) -->
-    <g transform="rotate(270) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#ec4899" letter-spacing="1">
+    <!-- 270° - r=185 -->
+    <g transform="rotate(270) translate(0,-185)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#ec4899" letter-spacing="1">
         22 LANGUAGES
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-18s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-18s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-18s"/>
       </text>
     </g>
 
-    <!-- 292.5° - MULTILINGUAL -->
-    <g transform="rotate(292.5) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#f59e0b" letter-spacing="1">
+    <!-- 292.5° - r=205 PEAK -->
+    <g transform="rotate(292.5) translate(0,-205)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#f59e0b" letter-spacing="1">
         MULTILINGUAL
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-19.5s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-19.5s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-19.5s"/>
       </text>
     </g>
 
-    <!-- 315° - SALES -->
-    <g transform="rotate(315) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#10b981" letter-spacing="1">
+    <!-- 315° - r=185 -->
+    <g transform="rotate(315) translate(0,-185)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#10b981" letter-spacing="1">
         SALES
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-21s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-21s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-21s"/>
       </text>
     </g>
 
-    <!-- 337.5° - SUPPORT -->
-    <g transform="rotate(337.5) translate(0,-150)">
-      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="8" fill="#06b6d4" letter-spacing="1">
+    <!-- 337.5° - r=165 VALLEY -->
+    <g transform="rotate(337.5) translate(0,-165)">
+      <text transform="rotate(90)" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#06b6d4" letter-spacing="1">
         SUPPORT
-        <animate attributeName="font-size" values="8;8;14;14;8;8;14;14;8" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-22.5s"/>
+        <animate attributeName="font-size" values="13;13;22;22;13;13;22;22;13" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-22.5s"/>
         <animate attributeName="opacity" values="0.6;0.6;1;1;0.6;0.6;1;1;0.6" keyTimes="0;0.2;0.25;0.3;0.5;0.7;0.75;0.8;1" dur="24s" repeatCount="indefinite" begin="-22.5s"/>
       </text>
     </g>
   </g>
 
-  <!-- Subtle guide ellipse -->
-  <ellipse cx="300" cy="250" rx="170" ry="170" fill="none" stroke="#1e293b" stroke-width="0.5" stroke-dasharray="3,6" opacity="0.3"/>
+  <!-- Subtle wavy guide ellipse -->
+  <ellipse cx="300" cy="250" rx="195" ry="195" fill="none" stroke="#1e293b" stroke-width="0.5" stroke-dasharray="3,6" opacity="0.2"/>
 
-  <!-- Center VAAK text with RGB animation -->
-  <text x="300" y="260" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="52" font-weight="800" fill="url(#rgbGradient)" filter="url(#glow)" letter-spacing="5">
+  <!-- Center VAAK text with RGB animation and breathing effect -->
+  <text x="300" y="265" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="64" font-weight="800" fill="url(#rgbGradient)" filter="url(#glow)" letter-spacing="6">
     VAAK
+    <!-- Breathing animation: sinusoidal size pulse -->
+    <animate attributeName="font-size" values="58;64;70;64;58" keyTimes="0;0.25;0.5;0.75;1" dur="4s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1; 0.4 0 0.6 1; 0.4 0 0.6 1; 0.4 0 0.6 1"/>
   </text>
 
-  <!-- Sanskrit subtitle -->
-  <text x="300" y="285" text-anchor="middle" font-family="system-ui,sans-serif" font-size="12" fill="#64748b" letter-spacing="3">
+  <!-- Sanskrit subtitle with subtle breathing -->
+  <text x="300" y="295" text-anchor="middle" font-family="system-ui,sans-serif" font-size="16" fill="#64748b" letter-spacing="3">
     वाक्
+    <animate attributeName="font-size" values="15;16;18;16;15" keyTimes="0;0.25;0.5;0.75;1" dur="4s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1; 0.4 0 0.6 1; 0.4 0 0.6 1; 0.4 0 0.6 1"/>
   </text>
 
-  <!-- Inner ring -->
-  <circle cx="300" cy="250" r="50" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+  <!-- Inner ring with breathing -->
+  <circle cx="300" cy="250" r="58" fill="none" stroke="#1e293b" stroke-width="0.5">
+    <animate attributeName="r" values="55;58;62;58;55" keyTimes="0;0.25;0.5;0.75;1" dur="4s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1; 0.4 0 0.6 1; 0.4 0 0.6 1; 0.4 0 0.6 1"/>
+  </circle>
 </svg>
