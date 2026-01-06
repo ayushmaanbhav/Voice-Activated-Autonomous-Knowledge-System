@@ -21,17 +21,50 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use futures::stream::Stream;
 use std::convert::Infallible;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 
 use crate::state::AppState;
 
-/// Faster-whisper HTTP service URL
-const WHISPER_SERVICE_URL: &str = "http://127.0.0.1:8091";
+// Pre-compiled regex patterns for markdown stripping (compiled once at startup)
+static RE_HEADERS: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"(?m)^#{1,6}\s*").unwrap());
+static RE_BOLD_ASTERISK: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"\*\*([^*]+)\*\*").unwrap());
+static RE_BOLD_UNDERSCORE: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"__([^_]+)__").unwrap());
+static RE_ITALIC: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"\*([^*\n]+)\*").unwrap());
+static RE_INLINE_CODE: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"`([^`]+)`").unwrap());
+static RE_BULLET_POINTS: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"(?m)^[\s]*[-*+]\s+").unwrap());
+static RE_NUMBERED_LIST: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"(?m)^\s*\d+\.\s+").unwrap());
+static RE_LINKS: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap());
+static RE_MULTIPLE_NEWLINES: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"\n{3,}").unwrap());
 
-/// Python IndicConformer STT service URL
-const PYTHON_STT_SERVICE_URL: &str = "http://127.0.0.1:8090";
+// Service URLs loaded from environment with fallback defaults
+static WHISPER_SERVICE_URL: Lazy<String> = Lazy::new(|| {
+    std::env::var("STT_URL").unwrap_or_else(|_| "http://127.0.0.1:8091".to_string())
+});
+static TTS_SERVICE_URL: Lazy<String> = Lazy::new(|| {
+    std::env::var("TTS_URL").unwrap_or_else(|_| "http://127.0.0.1:8092".to_string())
+});
 
-/// TTS HTTP service URL (IndicF5)
-const TTS_SERVICE_URL: &str = "http://127.0.0.1:8092";
+use voice_agent_pipeline::stt::{IndicConformerStt, IndicConformerConfig};
+
+/// STT pool size (number of concurrent STT instances)
+/// Can be overridden via STT_POOL_SIZE env var
+static STT_POOL_SIZE: Lazy<usize> = Lazy::new(|| {
+    std::env::var("STT_POOL_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2) // Default to 2 concurrent instances
+});
+
+/// STT Pool - allows multiple concurrent STT requests
+/// Uses a channel to distribute IndicConformerStt instances
+struct SttPool {
+    sender: tokio::sync::mpsc::Sender<IndicConformerStt>,
+    receiver: Mutex<tokio::sync::mpsc::Receiver<IndicConformerStt>>,
+}
+
+/// Lazy-initialized STT pool for concurrent request handling
+static STT_POOL: Lazy<Mutex<Option<SttPool>>> = Lazy::new(|| Mutex::new(None));
 
 /// Request for push-to-talk processing
 #[derive(Debug, Deserialize)]
@@ -100,7 +133,7 @@ async fn transcribe_with_whisper(audio: &[f32], language: &str) -> Result<String
 
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("{}/transcribe", WHISPER_SERVICE_URL))
+        .post(format!("{}/transcribe", &*WHISPER_SERVICE_URL))
         .json(&serde_json::json!({
             "audio": audio_b64,
             "language": language,
@@ -134,113 +167,119 @@ async fn transcribe_with_whisper(audio: &[f32], language: &str) -> Result<String
     Ok(text)
 }
 
-/// Call Python IndicConformer STT service for Indian languages
-async fn transcribe_with_python_stt(audio: &[f32], language: &str) -> Result<String, String> {
-    // Convert f32 samples to PCM16 bytes (the Python service expects PCM16)
-    let pcm16_bytes: Vec<u8> = audio
-        .iter()
-        .flat_map(|&f| {
-            let sample = (f * 32768.0).clamp(-32768.0, 32767.0) as i16;
-            sample.to_le_bytes()
-        })
-        .collect();
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(format!("{}/transcribe", PYTHON_STT_SERVICE_URL))
-        .header("Content-Type", "audio/pcm")
-        .header("X-Language", language)
-        .body(pcm16_bytes)
-        .timeout(std::time::Duration::from_secs(60))
-        .send()
-        .await
-        .map_err(|e| format!("Python STT service request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Python STT service error {}: {}", status, body));
+/// Initialize STT pool if not already initialized
+/// Creates multiple IndicConformerStt instances for concurrent processing
+fn init_stt_pool(language: &str) -> Result<(), String> {
+    let mut pool_guard = STT_POOL.lock();
+    if pool_guard.is_some() {
+        return Ok(()); // Already initialized
     }
 
-    let result: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Python STT response: {}", e))?;
-
-    let text = result["text"].as_str().unwrap_or("").to_string();
-    let confidence = result["confidence"].as_f64().unwrap_or(0.0);
-    let backend = result["backend"].as_str().unwrap_or("unknown");
-
-    // Safely truncate UTF-8 text for logging (Hindi chars are multi-byte)
-    let display_text: String = text.chars().take(100).collect();
+    let pool_size = *STT_POOL_SIZE;
     tracing::info!(
-        backend = %backend,
-        confidence = %confidence,
-        text_len = text.len(),
-        "Python STT transcribed: '{}'",
-        display_text
+        pool_size = pool_size,
+        language = language,
+        "Initializing IndicConformer STT pool for PTT..."
     );
 
-    Ok(text)
+    let (tx, rx) = tokio::sync::mpsc::channel(pool_size);
+    let model_dir = std::path::Path::new("models/stt/indicconformer");
+
+    // Create pool_size STT instances
+    for i in 0..pool_size {
+        let config = IndicConformerConfig {
+            language: language.to_string(),
+            ..Default::default()
+        };
+        match IndicConformerStt::new(model_dir, config) {
+            Ok(stt) => {
+                if tx.try_send(stt).is_err() {
+                    tracing::warn!("Failed to add STT instance {} to pool", i);
+                }
+            }
+            Err(e) => {
+                return Err(format!("Failed to initialize STT instance {}: {}", i, e));
+            }
+        }
+    }
+
+    *pool_guard = Some(SttPool {
+        sender: tx,
+        receiver: Mutex::new(rx),
+    });
+
+    tracing::info!(
+        pool_size = pool_size,
+        "IndicConformer STT pool initialized for PTT"
+    );
+    Ok(())
+}
+
+/// Acquire an STT instance from the pool (waits if all instances are busy)
+async fn acquire_stt() -> Result<IndicConformerStt, String> {
+    loop {
+        // Try to acquire from pool
+        {
+            let pool_guard = STT_POOL.lock();
+            if let Some(pool) = pool_guard.as_ref() {
+                let mut rx = pool.receiver.lock();
+                match rx.try_recv() {
+                    Ok(stt) => return Ok(stt),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        return Err("STT pool channel disconnected".to_string());
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                        // All instances busy, will retry after sleep
+                    }
+                }
+            } else {
+                return Err("STT pool not initialized".to_string());
+            }
+        }
+        // Wait before retrying (all instances are busy)
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// Release an STT instance back to the pool
+fn release_stt(stt: IndicConformerStt) {
+    let pool_guard = STT_POOL.lock();
+    if let Some(pool) = pool_guard.as_ref() {
+        let _ = pool.sender.try_send(stt);
+    }
 }
 
 /// Strip markdown formatting for TTS output
 /// Removes headers (##), bold (**), italic (*), bullets, etc.
+/// Uses pre-compiled static regex patterns for performance.
 fn strip_markdown_for_tts(text: &str) -> String {
     let mut result = text.to_string();
 
     // Remove headers (## Header)
-    result = regex::Regex::new(r"(?m)^#{1,6}\s*")
-        .unwrap()
-        .replace_all(&result, "")
-        .to_string();
+    result = RE_HEADERS.replace_all(&result, "").to_string();
 
     // Remove bold (**text** or __text__)
-    result = regex::Regex::new(r"\*\*([^*]+)\*\*")
-        .unwrap()
-        .replace_all(&result, "$1")
-        .to_string();
-    result = regex::Regex::new(r"__([^_]+)__")
-        .unwrap()
-        .replace_all(&result, "$1")
-        .to_string();
+    result = RE_BOLD_ASTERISK.replace_all(&result, "$1").to_string();
+    result = RE_BOLD_UNDERSCORE.replace_all(&result, "$1").to_string();
 
     // Remove italic (*text* or _text_) - bold (**) already removed above
     // Simple pattern works since bold was already stripped
-    result = regex::Regex::new(r"\*([^*\n]+)\*")
-        .unwrap()
-        .replace_all(&result, "$1")
-        .to_string();
+    result = RE_ITALIC.replace_all(&result, "$1").to_string();
 
     // Remove inline code (`code`)
-    result = regex::Regex::new(r"`([^`]+)`")
-        .unwrap()
-        .replace_all(&result, "$1")
-        .to_string();
+    result = RE_INLINE_CODE.replace_all(&result, "$1").to_string();
 
     // Remove bullet points (- item or * item) at start of lines
-    result = regex::Regex::new(r"(?m)^[\s]*[-*+]\s+")
-        .unwrap()
-        .replace_all(&result, "")
-        .to_string();
+    result = RE_BULLET_POINTS.replace_all(&result, "").to_string();
 
     // Remove numbered lists (1. item)
-    result = regex::Regex::new(r"(?m)^\s*\d+\.\s+")
-        .unwrap()
-        .replace_all(&result, "")
-        .to_string();
+    result = RE_NUMBERED_LIST.replace_all(&result, "").to_string();
 
     // Remove links [text](url) -> text
-    result = regex::Regex::new(r"\[([^\]]+)\]\([^)]+\)")
-        .unwrap()
-        .replace_all(&result, "$1")
-        .to_string();
+    result = RE_LINKS.replace_all(&result, "$1").to_string();
 
     // Remove multiple newlines
-    result = regex::Regex::new(r"\n{3,}")
-        .unwrap()
-        .replace_all(&result, "\n\n")
-        .to_string();
+    result = RE_MULTIPLE_NEWLINES.replace_all(&result, "\n\n").to_string();
 
     // Trim whitespace
     result.trim().to_string()
@@ -253,7 +292,7 @@ async fn synthesize_with_tts(text: &str, language: &str) -> Result<(String, Stri
 
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("{}/synthesize", TTS_SERVICE_URL))
+        .post(format!("{}/synthesize", &*TTS_SERVICE_URL))
         .json(&serde_json::json!({
             "text": clean_text,
             "language": language
@@ -344,17 +383,52 @@ pub async fn handle_ptt(
             }
         }
     } else {
-        // Use Python IndicConformer STT service for Indian languages
-        match transcribe_with_python_stt(&pcm_f32, &request.language).await {
-            Ok(text) => text,
+        // Use Rust IndicConformer STT for Indian languages (from pool)
+        if let Err(e) = init_stt_pool(&request.language) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e })),
+            );
+        }
+
+        // Acquire STT instance from pool (waits if all busy)
+        let stt = match acquire_stt().await {
+            Ok(stt) => stt,
             Err(e) => {
-                tracing::error!("Python STT service error: {}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": format!("STT failed: {}", e) })),
+                    Json(serde_json::json!({ "error": e })),
                 );
             }
+        };
+
+        // Reset STT state before processing new audio
+        stt.reset();
+
+        tracing::info!(
+            pcm_samples = pcm_f32.len(),
+            duration_secs = pcm_f32.len() as f32 / 16000.0,
+            "IndicConformer processing audio"
+        );
+
+        // Process the audio
+        if let Err(e) = stt.process(&pcm_f32) {
+            tracing::error!("IndicConformer STT process error: {}", e);
         }
+
+        // Finalize to get transcript
+        let final_result = stt.finalize();
+        tracing::info!(
+            text_len = final_result.text.len(),
+            text = %final_result.text,
+            confidence = final_result.confidence,
+            "IndicConformer finalized transcript"
+        );
+
+        // Release STT instance back to pool
+        release_stt(stt);
+
+        final_result.text
     };
     metrics.stt_ms = stt_start.elapsed().as_millis() as u64;
 
@@ -891,38 +965,148 @@ pub async fn translate_handler(
 
 /// Health check for PTT service
 pub async fn ptt_health() -> impl IntoResponse {
-    // Check Python STT service health
-    let client = reqwest::Client::new();
-    let stt_check = client
-        .get(format!("{}/health", PYTHON_STT_SERVICE_URL))
-        .timeout(std::time::Duration::from_secs(5))
-        .send()
-        .await;
+    // Check if STT model exists
+    let model_path = std::path::Path::new("models/stt/indicconformer/assets/encoder.onnx");
+    let mask_path = std::path::Path::new("models/stt/indicconformer/assets/language_masks.json");
+    let stt_ok = model_path.exists() && mask_path.exists();
 
-    match stt_check {
-        Ok(resp) if resp.status().is_success() => {
-            let body: serde_json::Value = resp.json().await.unwrap_or_default();
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "status": "ok",
-                    "stt_backend": "python_indicconformer",
-                    "stt_service": PYTHON_STT_SERVICE_URL,
-                    "backends": body.get("backends").cloned()
-                })),
-            )
-        }
-        _ => {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "error": "Python STT service not available",
-                    "stt_service": PYTHON_STT_SERVICE_URL
-                })),
-            )
-        }
+    if stt_ok {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "ok",
+                "stt_backend": "rust_indicconformer",
+                "model_path": model_path.to_string_lossy(),
+                "mask_loaded": mask_path.exists()
+            })),
+        )
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "error",
+                "error": "STT model not found",
+                "expected_model": model_path.to_string_lossy(),
+                "expected_mask": mask_path.to_string_lossy()
+            })),
+        )
     }
+}
+
+/// Request for STT-only testing
+#[derive(Debug, Deserialize)]
+pub struct SttTestRequest {
+    /// Base64 encoded WAV audio
+    pub audio: String,
+    /// Language code (hi, en, etc.)
+    pub language: String,
+}
+
+/// STT-only endpoint for testing (no LLM/TTS)
+pub async fn handle_stt_test(
+    Json(request): Json<SttTestRequest>,
+) -> impl IntoResponse {
+    let start = std::time::Instant::now();
+
+    tracing::info!(
+        "STT test request: language={}, audio_size={}",
+        request.language,
+        request.audio.len()
+    );
+
+    // 1. Decode audio from base64
+    let audio_bytes = match BASE64.decode(&request.audio) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("Invalid base64 audio: {}", e) })),
+            );
+        }
+    };
+
+    // 2. Convert audio to PCM 16kHz mono f32
+    let pcm_f32 = match convert_to_pcm_f32(&audio_bytes, "wav").await {
+        Ok(pcm) => pcm,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("Audio conversion failed: {}", e) })),
+            );
+        }
+    };
+
+    tracing::info!("Converted to {} PCM samples", pcm_f32.len());
+
+    // 3. Run STT
+    let stt_start = std::time::Instant::now();
+    let transcription = if is_english(&request.language) {
+        // Use Whisper for English
+        match transcribe_with_whisper(&pcm_f32, &request.language).await {
+            Ok(text) => text,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": format!("Whisper STT failed: {}", e) })),
+                );
+            }
+        }
+    } else {
+        // Use Rust IndicConformer for Indian languages (from pool)
+        if let Err(e) = init_stt_pool(&request.language) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e })),
+            );
+        }
+
+        // Acquire STT instance from pool
+        let stt = match acquire_stt().await {
+            Ok(stt) => stt,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": e })),
+                );
+            }
+        };
+
+        // Reset STT state
+        stt.reset();
+
+        // Process the audio
+        if let Err(e) = stt.process(&pcm_f32) {
+            tracing::error!("IndicConformer STT process error: {}", e);
+        }
+
+        // Finalize
+        let result = stt.finalize();
+
+        // Release STT instance back to pool
+        release_stt(stt);
+
+        result.text
+    };
+    let stt_time = stt_start.elapsed();
+
+    let total_time = start.elapsed();
+
+    tracing::info!(
+        "STT test completed: text='{}', stt_time={:?}, total_time={:?}",
+        transcription,
+        stt_time,
+        total_time
+    );
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "text": transcription,
+            "language": request.language,
+            "stt_ms": stt_time.as_millis(),
+            "total_ms": total_time.as_millis()
+        })),
+    )
 }
 
 /// SSE event types for streaming PTT
@@ -1015,14 +1199,33 @@ pub async fn handle_ptt_stream(
                 }
             }
         } else {
-            // Use Python IndicConformer STT service for Indian languages
-            match transcribe_with_python_stt(&pcm_f32, &request.language).await {
-                Ok(text) => text,
+            // Use Rust IndicConformer STT for Indian languages (from pool)
+            if let Err(e) = init_stt_pool(&request.language) {
+                send_event(&tx, PttEvent::Error { message: e });
+                return;
+            }
+
+            // Acquire STT instance from pool
+            let stt = match acquire_stt().await {
+                Ok(stt) => stt,
                 Err(e) => {
-                    send_event(&tx, PttEvent::Error { message: format!("STT failed: {}", e) });
+                    send_event(&tx, PttEvent::Error { message: e });
                     return;
                 }
+            };
+
+            stt.reset();
+
+            if let Err(e) = stt.process(&pcm_f32) {
+                tracing::error!("IndicConformer STT process error: {}", e);
             }
+
+            let final_result = stt.finalize();
+
+            // Release STT instance back to pool
+            release_stt(stt);
+
+            final_result.text
         };
         metrics.stt_ms = stt_start.elapsed().as_millis() as u64;
 
