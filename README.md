@@ -2,6 +2,12 @@
 
 <img src="assets/vaak-logo.svg" alt="VAAK Logo" width="600"/>
 
+<br/>
+
+https://github.com/user-attachments/assets/VAAK__Sovereign_Voice_Agent.mp4
+
+<video src="VAAK__Sovereign_Voice_Agent.mp4" width="720" controls></video>
+
 # VAAK (वाक्)
 
 ### **Voice-Activated Autonomous Knowledge System**
