@@ -17,6 +17,7 @@ pub mod transcript;
 
 // New modules (Phase 1)
 pub mod compliance;
+pub mod domain;
 pub mod domain_context;
 pub mod language;
 pub mod llm_types;

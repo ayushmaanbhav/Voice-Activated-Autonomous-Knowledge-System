@@ -1,0 +1,147 @@
+# Gold Loan Domain Configuration
+# Kotak Mahindra Bank Gold Loan Voice Agent
+# Inherits from: config/base/defaults.yaml
+
+domain_id: gold_loan
+display_name: "Kotak Gold Loan"
+version: "1.0.0"
+
+# Brand Configuration
+brand:
+  bank_name: "Kotak Mahindra Bank"
+  agent_name: "Priya"
+  helpline: "1800-266-2666"
+  website: "https://www.kotak.com/gold-loan"
+
+# Business Constants (Source of Truth)
+constants:
+  # Interest Rates (tiered by loan amount)
+  interest_rates:
+    tiers:
+      - max_amount: 100000
+        rate: 11.5
+      - max_amount: 500000
+        rate: 10.5
+      - max_amount: null  # unlimited
+        rate: 9.5
+    base_rate: 10.5
+
+  # Loan-to-Value and Limits
+  ltv_percent: 75.0
+  loan_limits:
+    min: 10000
+    max: 25000000  # 2.5 Cr
+
+  # Fees
+  processing_fee_percent: 1.0
+  foreclosure_fee_percent: 0.0  # No foreclosure charges
+
+  # Gold Pricing
+  gold_price_per_gram: 7500.0  # Update regularly
+
+  # Purity Factors
+  purity_factors:
+    K24: 1.0
+    K22: 0.916
+    K18: 0.75
+    K14: 0.585
+
+# Branch Configuration
+branches:
+  total_count: 1600
+  doorstep_service:
+    enabled: true
+    min_loan_amount: 50000
+    booking_advance_hours: 24
+  major_cities:
+    - name: "Mumbai"
+      branch_count: 120
+    - name: "Delhi"
+      branch_count: 85
+    - name: "Bangalore"
+      branch_count: 65
+    - name: "Chennai"
+      branch_count: 55
+    - name: "Hyderabad"
+      branch_count: 50
+    - name: "Pune"
+      branch_count: 45
+
+# Competitor Configuration
+competitors:
+  muthoot:
+    display_name: "Muthoot Finance"
+    aliases: ["muthoot", "muthut", "muthoot finance"]
+    typical_rate: 18.0
+    ltv_percent: 75.0
+    type: "nbfc"
+  manappuram:
+    display_name: "Manappuram Finance"
+    aliases: ["manappuram", "manapuram", "manappuram gold"]
+    typical_rate: 19.0
+    ltv_percent: 75.0
+    type: "nbfc"
+  iifl:
+    display_name: "IIFL Finance"
+    aliases: ["iifl", "iifl gold", "india infoline"]
+    typical_rate: 17.0
+    ltv_percent: 75.0
+    type: "nbfc"
+  hdfc:
+    display_name: "HDFC Bank"
+    aliases: ["hdfc", "hdfc bank", "hdfc gold loan"]
+    typical_rate: 11.0
+    ltv_percent: 70.0
+    type: "bank"
+  sbi:
+    display_name: "State Bank of India"
+    aliases: ["sbi", "state bank", "sbi gold loan"]
+    typical_rate: 10.5
+    ltv_percent: 75.0
+    type: "bank"
+  icici:
+    display_name: "ICICI Bank"
+    aliases: ["icici", "icici bank", "icici gold loan"]
+    typical_rate: 11.5
+    ltv_percent: 70.0
+    type: "bank"
+
+# Product Variants
+products:
+  shakti_gold:
+    name: "Shakti Gold Loan"
+    description: "Quick gold loan with minimal documentation"
+    min_amount: 10000
+    max_amount: 2500000
+    features:
+      - "Same-day disbursement"
+      - "No income proof required"
+      - "Flexible repayment"
+  bullet_repayment:
+    name: "Bullet Repayment Gold Loan"
+    description: "Pay interest monthly, principal at end"
+    features:
+      - "Lower monthly outflow"
+      - "Ideal for business needs"
+  overdraft:
+    name: "Gold Loan Overdraft"
+    description: "Revolving credit against gold"
+    features:
+      - "Pay interest only on utilized amount"
+      - "Withdraw and deposit anytime"
+  agri_gold:
+    name: "Agri Gold Loan"
+    description: "Special rates for agricultural purposes"
+    features:
+      - "Subsidized interest rates"
+      - "Longer repayment tenure"
+
+# High-Value Customer Configuration
+high_value:
+  amount_threshold: 500000
+  weight_threshold_grams: 100
+  features:
+    - "Dedicated relationship manager"
+    - "Priority processing"
+    - "Doorstep service"
+    - "Premium rates"

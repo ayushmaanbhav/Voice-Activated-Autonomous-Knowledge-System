@@ -20,6 +20,7 @@ pub mod competitor;
 // P1 FIX: Centralized constants module
 pub mod constants;
 pub mod domain;
+pub mod domain_config;
 pub mod gold_loan;
 pub mod pipeline;
 pub mod product;
