@@ -4,9 +4,7 @@
 
 <br/>
 
-https://github.com/user-attachments/assets/VAAK__Sovereign_Voice_Agent.mp4
-
-<video src="VAAK__Sovereign_Voice_Agent.mp4" width="720" controls></video>
+<video src="https://github.com/ayushmaanbhav/ai-rag-voice-sales-agent/raw/main/VAAK__Sovereign_Voice_Agent.mp4" width="720" controls></video>
 
 # VAAK (वाक्)
 
