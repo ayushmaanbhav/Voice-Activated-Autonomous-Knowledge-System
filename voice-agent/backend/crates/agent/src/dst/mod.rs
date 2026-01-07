@@ -210,8 +210,6 @@ pub struct DialogueStateTracker {
     state: GoldLoanDialogueState,
     /// History of state changes
     history: Vec<StateChange>,
-    /// Slot extractor for enhanced extraction
-    extractor: SlotExtractor,
     /// Configuration
     config: DstConfig,
     /// P13 FIX: Domain view for config-driven instructions (optional for backward compat)
@@ -280,7 +278,6 @@ impl DialogueStateTracker {
         Self {
             state: GoldLoanDialogueState::new(),
             history: Vec::new(),
-            extractor: SlotExtractor::new(),
             config: DstConfig::default(),
             domain_view: None,
         }
@@ -291,7 +288,6 @@ impl DialogueStateTracker {
         Self {
             state: GoldLoanDialogueState::new(),
             history: Vec::new(),
-            extractor: SlotExtractor::new(),
             config,
             domain_view: None,
         }
@@ -515,7 +511,22 @@ impl DialogueStateTracker {
     }
 
     /// Check if all required slots for an intent are filled
+    /// Uses config-driven mappings if domain view is set, falls back to hardcoded
     pub fn is_intent_complete(&self, intent: &str) -> bool {
+        // P13 FIX: Use config-driven required slots via domain view
+        if let Some(ref view) = self.domain_view {
+            // Map intent to goal, then check required slots for that goal
+            let goal_id = view.goal_for_intent(intent).unwrap_or(intent);
+            let required = view.required_slots_for_goal(goal_id);
+
+            if !required.is_empty() {
+                return required.iter().all(|slot| self.state.get_slot_value(slot).is_some());
+            }
+            // If no required slots defined, intent is complete
+            return true;
+        }
+
+        // Fallback: hardcoded mappings for backward compatibility
         match intent {
             "eligibility_check" => self.state.gold_weight_grams().is_some(),
             "switch_lender" => self.state.current_lender().is_some(),
@@ -526,7 +537,24 @@ impl DialogueStateTracker {
     }
 
     /// Get missing required slots for an intent
+    /// Uses config-driven mappings if domain view is set, falls back to hardcoded
     pub fn missing_slots_for_intent(&self, intent: &str) -> Vec<&str> {
+        // P13 FIX: Use config-driven required slots via domain view
+        if let Some(ref view) = self.domain_view {
+            // Map intent to goal, then get required slots for that goal
+            let goal_id = view.goal_for_intent(intent).unwrap_or(intent);
+            let required = view.required_slots_for_goal(goal_id);
+
+            // Filter to only slots that are missing
+            // Note: We return &str from the config, but the caller expects &str
+            // This is safe because the config lives for the duration of the view
+            return required
+                .into_iter()
+                .filter(|slot| self.state.get_slot_value(slot).is_none())
+                .collect();
+        }
+
+        // Fallback: hardcoded mappings for backward compatibility
         match intent {
             "eligibility_check" => {
                 let mut missing = Vec::new();
@@ -604,6 +632,37 @@ impl DialogueStateTracker {
     /// Check if we should auto-capture lead (when we have contact info during any goal)
     pub fn should_auto_capture_lead(&self) -> bool {
         self.state.should_auto_capture_lead()
+    }
+
+    /// P13 FIX: Get completion tool/action for current goal
+    /// Returns the tool to call when all required slots are filled
+    pub fn completion_action_for_goal(&self, goal_id: &str) -> Option<&str> {
+        self.domain_view
+            .as_ref()
+            .and_then(|view| view.completion_action_for_goal(goal_id))
+    }
+
+    /// P13 FIX: Get prompt to ask for a missing slot
+    /// Returns a localized prompt from config, or generates a default
+    pub fn slot_prompt(&self, slot_name: &str, language: &str) -> String {
+        // Try to get from config first
+        if let Some(ref view) = self.domain_view {
+            // Check if slot definition has a description we can use
+            if let Some(slot_def) = view.get_slot(slot_name) {
+                if !slot_def.description.is_empty() {
+                    let prefix = if language == "hi" { "कृपया बताएं" } else { "Please provide" };
+                    return format!("{} {}.", prefix, slot_def.description.to_lowercase());
+                }
+            }
+        }
+
+        // Fallback: generate default prompt
+        let slot_display = slot_name.replace('_', " ");
+        if language == "hi" {
+            format!("कृपया अपना {} बताएं।", slot_display)
+        } else {
+            format!("Please provide your {}.", slot_display)
+        }
     }
 
     /// Reset the tracker
