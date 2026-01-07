@@ -32,13 +32,13 @@ use voice_agent_text_processing::translation::{
     CandleIndicTrans2Config, CandleIndicTrans2Translator,
 };
 
-use crate::conversation::{Conversation, ConversationConfig, ConversationEvent, EndReason};
+use crate::conversation::{Conversation, ConversationConfig, ConversationContext, ConversationEvent, EndReason};
 use crate::dst::DialogueStateTracker;
 use crate::lead_scoring::{
     EscalationTrigger, LeadRecommendation, LeadScore, LeadScoringEngine,
 };
 use crate::memory::{ConversationTurn, TurnRole};
-use crate::persuasion::PersuasionEngine;
+use crate::persuasion::{PersuasionEngine, PersuasionStrategy};
 use crate::stage::ConversationStage;
 use crate::AgentError;
 
@@ -70,7 +70,8 @@ struct PrefetchEntry {
 /// For backwards compatibility, `DomainAgent` is available as a type alias.
 pub struct DomainAgent {
     config: AgentConfig,
-    conversation: Arc<Conversation>,
+    /// Phase 2: Uses ConversationContext trait for domain-agnostic conversation management
+    conversation: Arc<dyn ConversationContext>,
     tools: Arc<ToolRegistry>,
     /// P1 FIX: Now uses LanguageModel trait instead of LlmBackend for proper abstraction
     llm: Option<Arc<dyn LanguageModel>>,
@@ -91,8 +92,8 @@ pub struct DomainAgent {
     translator: Option<Arc<dyn Translator>>,
     /// P5 FIX: User's language for translation
     user_language: Language,
-    /// P0 FIX: Persuasion engine for objection handling
-    persuasion: PersuasionEngine,
+    /// Phase 2: Uses PersuasionStrategy trait for domain-agnostic objection handling
+    persuasion: Arc<dyn PersuasionStrategy>,
     /// P1-2 FIX: Speculative executor for low-latency generation
     /// Uses SLM for fast drafts, LLM for verification/improvement
     speculative: Option<Arc<SpeculativeExecutor>>,
@@ -216,7 +217,7 @@ impl DomainAgent {
         };
 
         // P0 FIX: Initialize persuasion engine for objection handling
-        let persuasion = PersuasionEngine::new();
+        let persuasion: Arc<dyn PersuasionStrategy> = Arc::new(PersuasionEngine::new());
 
         // P1-2 FIX: Initialize speculative executor if enabled
         let speculative = if config.speculative.enabled {
@@ -353,7 +354,7 @@ impl DomainAgent {
         };
 
         // P0 FIX: Initialize persuasion engine for objection handling
-        let persuasion = PersuasionEngine::new();
+        let persuasion: Arc<dyn PersuasionStrategy> = Arc::new(PersuasionEngine::new());
 
         // P1-2 FIX: Initialize speculative executor if enabled
         let speculative = if config.speculative.enabled {
@@ -439,7 +440,7 @@ impl DomainAgent {
         };
 
         // P0 FIX: Initialize persuasion engine for objection handling
-        let persuasion = PersuasionEngine::new();
+        let persuasion: Arc<dyn PersuasionStrategy> = Arc::new(PersuasionEngine::new());
 
         // Phase 10: Initialize lead scoring engine
         let lead_scoring = LeadScoringEngine::new();
@@ -511,7 +512,8 @@ impl DomainAgent {
     /// updates persona goal with brand names from config, and wires DST for instructions.
     pub fn with_domain_view(mut self, view: Arc<AgentDomainView>) -> Self {
         // P13 FIX: Reinitialize persuasion engine with config-driven responses
-        self.persuasion = PersuasionEngine::from_view(&view);
+        // Phase 2: Cast to trait object
+        self.persuasion = Arc::new(PersuasionEngine::from_view(&view));
 
         // P13 FIX: Update persona goal with brand names from config
         // This overrides the default hardcoded "Kotak Mahindra Bank" in constructors
@@ -2294,8 +2296,10 @@ impl DomainAgent {
         self.conversation.stage()
     }
 
-    /// Get conversation reference
-    pub fn conversation(&self) -> &Conversation {
+    /// Get conversation context reference
+    ///
+    /// Phase 2: Returns trait object for domain-agnostic access
+    pub fn conversation(&self) -> &Arc<dyn ConversationContext> {
         &self.conversation
     }
 
