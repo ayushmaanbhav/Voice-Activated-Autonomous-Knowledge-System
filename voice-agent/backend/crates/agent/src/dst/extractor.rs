@@ -2,40 +2,20 @@
 //!
 //! Implements rule-based and pattern-based slot extraction from user utterances.
 //! Supports Hindi, Hinglish, and English utterances.
+//!
+//! ## Phase 3 Optimization: Static Regex Patterns
+//!
+//! Regex patterns are compiled once at program start using `once_cell::sync::Lazy`.
+//! This avoids recompiling patterns on every `SlotExtractor::new()` call.
 
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
 use voice_agent_text_processing::intent::{Slot, SlotType};
 
-/// Slot extractor for gold loan domain
-pub struct SlotExtractor {
-    /// Regex patterns for amount extraction
-    amount_patterns: Vec<(Regex, AmountMultiplier)>,
-    /// Regex patterns for weight extraction
-    weight_patterns: Vec<Regex>,
-    /// Regex patterns for phone extraction
-    phone_patterns: Vec<Regex>,
-    /// Regex patterns for pincode extraction
-    pincode_patterns: Vec<Regex>,
-    /// Regex patterns for time extraction
-    time_patterns: Vec<Regex>,
-    /// Lender name patterns
-    lender_patterns: HashMap<String, Vec<String>>,
-    /// Regex patterns for name extraction
-    name_patterns: Vec<Regex>,
-    /// Regex patterns for PAN extraction
-    pan_patterns: Vec<Regex>,
-    /// Regex patterns for DOB extraction
-    dob_patterns: Vec<Regex>,
-    /// Regex patterns for loan purpose extraction
-    purpose_patterns: Vec<(Regex, String)>,
-    /// Regex patterns for repayment type extraction
-    repayment_patterns: Vec<(Regex, String)>,
-    /// Regex patterns for city extraction
-    city_patterns: Vec<Regex>,
-    /// Intent detection patterns
-    intent_patterns: Vec<(Regex, String)>,
-}
+// =============================================================================
+// STATIC REGEX PATTERNS - Compiled once at program start
+// =============================================================================
 
 /// Amount multiplier for parsing
 #[derive(Debug, Clone, Copy)]
@@ -57,254 +37,162 @@ impl AmountMultiplier {
     }
 }
 
+// Amount patterns (Crore, Lakh, Thousand, Rupee, Plain numbers)
+static AMOUNT_PATTERNS: Lazy<Vec<(Regex, AmountMultiplier)>> = Lazy::new(|| vec![
+    (Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:crore|cr|करोड़)").unwrap(), AmountMultiplier::Crore),
+    (Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:lakh|lac|लाख)").unwrap(), AmountMultiplier::Lakh),
+    (Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:thousand|k|हज़ार|hazar)").unwrap(), AmountMultiplier::Thousand),
+    (Regex::new(r"(?:₹|rs\.?|rupees?)\s*(\d+(?:,\d+)*)").unwrap(), AmountMultiplier::Unit),
+    (Regex::new(r"\b(\d{5,8})\b").unwrap(), AmountMultiplier::Unit),
+]);
+
+// Weight patterns (grams, tola, contextual)
+static WEIGHT_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| vec![
+    Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:grams?|gm|g|ग्राम)").unwrap(),
+    Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:tola|तोला)").unwrap(),
+    Regex::new(r"(?i)(?:have|hai|है)\s*(\d+(?:\.\d+)?)\s*(?:grams?|g)?\s*(?:gold|sona|सोना)").unwrap(),
+]);
+
+// Phone patterns (Indian mobile numbers)
+static PHONE_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| vec![
+    Regex::new(r"\b([6-9]\d{9})\b").unwrap(),
+    Regex::new(r"(?:\+91|91)?[-\s]?([6-9]\d{9})\b").unwrap(),
+    Regex::new(r"\b([6-9]\d{2})[-\s]?(\d{3})[-\s]?(\d{4})\b").unwrap(),
+]);
+
+// Pincode patterns (Indian 6-digit pincodes)
+static PINCODE_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| vec![
+    Regex::new(r"\b([1-9]\d{5})\b").unwrap(),
+    Regex::new(r"(?i)(?:pincode|pin|पिनकोड)\s*(?:is|hai|है)?\s*(\d{6})").unwrap(),
+]);
+
+// Time patterns
+static TIME_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| vec![
+    Regex::new(r"(?i)(\d{1,2})(?::(\d{2}))?\s*(am|pm|बजे)").unwrap(),
+    Regex::new(r"(?i)(morning|afternoon|evening|subah|dopahar|shaam)").unwrap(),
+]);
+
+// Name patterns (English and Hindi)
+static NAME_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| vec![
+    Regex::new(r"(?i)(?:my\s+name\s+is|i\s+am|i'm|this\s+is|call\s+me)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)").unwrap(),
+    Regex::new(r"(?i)(?:mera\s+)?(?:naam|name)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]*)?)\s+(?:hai|h)\b").unwrap(),
+    Regex::new(r"(?i)(?:mera\s+)?(?:naam|name)\s+([A-Z][a-zA-Z]+)(?:\s+[A-Z][a-zA-Z]+)?(?:\s|$|[.,])").unwrap(),
+    Regex::new(r"(?i)(?:myself|name[:\s]+)\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)").unwrap(),
+]);
+
+// PAN patterns
+static PAN_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| vec![
+    Regex::new(r"(?i)(?:pan|pan\s+(?:card|number|no\.?)|my\s+pan)\s*(?:is|:)?\s*([A-Z]{5}[0-9]{4}[A-Z])").unwrap(),
+    Regex::new(r"\b([A-Z]{5}[0-9]{4}[A-Z])\b").unwrap(),
+    Regex::new(r"(?i)pan\s+(?:is|:)?\s*(\d{8,10})").unwrap(),
+]);
+
+// DOB patterns
+static DOB_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| vec![
+    Regex::new(r"(?i)(?:date\s+of\s+birth|dob|born\s+on|birthday)\s*(?:is|:)?\s*(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})").unwrap(),
+    Regex::new(r"(?i)(?:date\s+of\s+birth|dob|born\s+on|birthday)\s*(?:is|:)?\s*(\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{2,4})").unwrap(),
+    Regex::new(r"(?i)(?:janam\s+din|janam\s+tithi)\s*(?:hai|:)?\s*(\d{1,2}\s+\w+\s+\d{2,4})").unwrap(),
+]);
+
+// Loan purpose patterns
+static PURPOSE_PATTERNS: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| vec![
+    (Regex::new(r"(?i)(?:business|dhandha|vyapaar|karobar|shop|dukaan)").unwrap(), "business"),
+    (Regex::new(r"(?i)(?:working\s+capital|stock|inventory|माल)").unwrap(), "business_working_capital"),
+    (Regex::new(r"(?i)(?:medical|hospital|doctor|treatment|ilaj|ilaaj|dawai|medicine|surgery|operation)").unwrap(), "medical"),
+    (Regex::new(r"(?i)(?:education|school|college|fees|padhai|study|exam|admission)").unwrap(), "education"),
+    (Regex::new(r"(?i)(?:wedding|marriage|shaadi|shadi|vivah|byah)").unwrap(), "wedding"),
+    (Regex::new(r"(?i)(?:renovation|repair|construction|ghar|home\s+improvement|makaan)").unwrap(), "home_renovation"),
+    (Regex::new(r"(?i)(?:farming|agriculture|khet|kheti|crop|fasal|tractor|seeds|beej)").unwrap(), "agriculture"),
+    (Regex::new(r"(?i)(?:debt|loan\s+repay|karza|karz|EMI\s+pay)").unwrap(), "debt_consolidation"),
+    (Regex::new(r"(?i)(?:emergency|urgent|zaruri|jaldi|turant|immediately)").unwrap(), "emergency"),
+]);
+
+// Repayment type patterns
+static REPAYMENT_PATTERNS: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| vec![
+    (Regex::new(r"(?i)(?:EMI|monthly\s+(?:payment|installment)|mahina|kishte)").unwrap(), "emi"),
+    (Regex::new(r"(?i)(?:bullet|lump\s*sum|one\s+time|ek\s+baar|ekmusht)").unwrap(), "bullet"),
+    (Regex::new(r"(?i)(?:overdraft|OD|credit\s+line|flexible)").unwrap(), "overdraft"),
+    (Regex::new(r"(?i)(?:interest\s+only|sirf\s+byaaj|only\s+interest)").unwrap(), "interest_only"),
+]);
+
+// City patterns (major Indian cities)
+static CITY_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| vec![
+    Regex::new(r"(?i)(?:from|in|at|near|city|sheher)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)").unwrap(),
+    Regex::new(r"(?i)\b(Mumbai|Delhi|Bangalore|Bengaluru|Chennai|Hyderabad|Kolkata|Pune|Ahmedabad|Jaipur|Lucknow|Kanpur|Nagpur|Indore|Thane|Bhopal|Visakhapatnam|Patna|Vadodara|Ghaziabad|Ludhiana|Agra|Nashik|Faridabad|Meerut|Rajkot|Kalyan|Vasai|Varanasi|Srinagar|Aurangabad|Dhanbad|Amritsar|Navi Mumbai|Allahabad|Ranchi|Howrah|Coimbatore|Jabalpur|Gwalior|Vijayawada|Jodhpur|Madurai|Raipur|Kota|Guwahati|Chandigarh|Solapur|Hubli|Mysore|Tiruchirappalli|Bareilly|Aligarh|Tiruppur|Gurgaon|Noida|NCR)\b").unwrap(),
+    Regex::new(r"(?i)\b(Dilli|Mumbay|Calcutta|Madras|Bangaluru)\b").unwrap(),
+]);
+
+// Intent detection patterns (order matters - more specific first)
+static INTENT_PATTERNS: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| vec![
+    (Regex::new(r"(?i)(?:balance\s+transfer|loan\s+transfer|transfer\s+(?:my\s+)?loan|move\s+(?:my\s+)?loan|transfer\s+kar|BT\s+kar|switch\s+(?:to|from)\s+\w+)").unwrap(), "balance_transfer"),
+    (Regex::new(r"(?i)(?:gold\s+(?:price|rate)|sone\s+ka\s+(?:rate|bhav|price)|aaj\s+ka\s+(?:gold\s+)?rate|today.+gold|current\s+gold)").unwrap(), "gold_price_inquiry"),
+    (Regex::new(r"(?i)(?:interest\s+rate|byaaj\s+dar|rate\s+kya|kitna\s+percent|what.+(?:interest|byaaj)\s+rate)").unwrap(), "rate_inquiry"),
+    (Regex::new(r"(?i)(?:kitna\s+bachega|how\s+much\s+(?:can\s+i\s+)?sav|bachat|savings|save\s+money|calculate\s+saving)").unwrap(), "savings_inquiry"),
+    (Regex::new(r"(?i)(?:am\s+i\s+eligible|eligibility|loan\s+milega|kitna\s+loan|qualify|kya\s+mil\s+sakta|eligible\s+for)").unwrap(), "eligibility_inquiry"),
+    (Regex::new(r"(?i)(?:documents?\s+(?:required|needed|chahiye|list)|kya\s+laana|what\s+(?:documents?|to\s+bring)|kaunsa\s+document|laana\s+(?:hoga|padega))").unwrap(), "document_inquiry"),
+    (Regex::new(r"(?i)(?:book\s+(?:an?\s+)?appointment|schedule\s+(?:a\s+)?(?:visit|appointment)|fix\s+(?:a\s+)?time|milna\s+(?:hai|chahta)|time\s+slot|slot\s+book)").unwrap(), "appointment_request"),
+    (Regex::new(r"(?i)(?:(?:nearest|nearby)\s+branch|branch\s+(?:location|kahan|where)|where\s+is\s+(?:the\s+)?(?:branch|office)|office\s+address|location\s+of)").unwrap(), "branch_inquiry"),
+    (Regex::new(r"(?i)(?:(?:is\s+)?(?:my\s+)?gold\s+safe|security|suraksha|chori|theft|insurance|vault|locker)").unwrap(), "safety_inquiry"),
+    (Regex::new(r"(?i)(?:repay|payment\s+(?:option|method)|EMI\s+(?:kaise|how)|bhugtan|kaise\s+dena|how\s+to\s+pay|repayment)").unwrap(), "repayment_inquiry"),
+    (Regex::new(r"(?i)(?:close\s+(?:my\s+)?loan|loan\s+close|release\s+(?:my\s+)?gold|gold\s+back|sona\s+wapas|get\s+(?:my\s+)?gold\s+back)").unwrap(), "closure_inquiry"),
+    (Regex::new(r"(?i)(?:talk\s+to\s+(?:a\s+)?human|(?:real\s+)?agent|real\s+person|customer\s+care|complaint|shikayat|(?:speak\s+(?:to|with)\s+)?manager)").unwrap(), "human_escalation"),
+    (Regex::new(r"(?i)(?:call\s+(?:me\s+)?back|callback|phone\s+kar|give\s+(?:me\s+)?(?:a\s+)?call|ring\s+me)").unwrap(), "callback_request"),
+    (Regex::new(r"(?i)(?:send\s+(?:me\s+)?(?:sms|message|details|info)|SMS\s+kar|whatsapp\s+(?:me|kar))").unwrap(), "sms_request"),
+    (Regex::new(r"(?i)(?:compare\s+(?:with|to)|comparison|vs\s+\w+|versus|better\s+than\s+(?:muthoot|manappuram|iifl))").unwrap(), "comparison_inquiry"),
+]);
+
+// Additional inline patterns (purity, tenure, rate, location)
+static PURITY_24K: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)24\s*(?:k|karat|carat|kt)").unwrap());
+static PURITY_22K: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)22\s*(?:k|karat|carat|kt)").unwrap());
+static PURITY_18K: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)18\s*(?:k|karat|carat|kt)").unwrap());
+static PURITY_14K: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)14\s*(?:k|karat|carat|kt)").unwrap());
+static PURITY_PURE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)pure\s*gold").unwrap());
+static PURITY_HALLMARK: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)hallmark(?:ed)?").unwrap());
+
+static TENURE_MONTHS: Lazy<Regex> = Lazy::new(|| Regex::new(r"(\d+)\s*(?:months?|mahine|महीने)").unwrap());
+static TENURE_YEARS: Lazy<Regex> = Lazy::new(|| Regex::new(r"(\d+)\s*(?:years?|saal|साल)").unwrap());
+
+static RATE_CONTEXT: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(?:interest\s+)?rate\s+(?:is|:)?\s*(\d+(?:\.\d+)?)\s*(?:%|percent|प्रतिशत)?").unwrap());
+static RATE_PERCENT: Lazy<Regex> = Lazy::new(|| Regex::new(r"(\d+(?:\.\d+)?)\s*(?:%|percent|प्रतिशत)").unwrap());
+
+static LOCATION_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(?:from|in|at|near|mein|में)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)").unwrap());
+
+// Lender patterns (built as HashMap for exact matching)
+static LENDER_PATTERNS: Lazy<HashMap<&'static str, Vec<&'static str>>> = Lazy::new(|| {
+    let mut patterns = HashMap::new();
+    patterns.insert("muthoot", vec!["muthoot", "muthut", "muthoot finance"]);
+    patterns.insert("manappuram", vec!["manappuram", "manapuram", "manappuram gold"]);
+    patterns.insert("hdfc", vec!["hdfc", "hdfc bank"]);
+    patterns.insert("icici", vec!["icici", "icici bank"]);
+    patterns.insert("sbi", vec!["sbi", "state bank"]);
+    patterns.insert("kotak", vec!["kotak", "kotak mahindra"]);
+    patterns.insert("axis", vec!["axis", "axis bank"]);
+    patterns.insert("federal", vec!["federal", "federal bank"]);
+    patterns.insert("iifl", vec!["iifl", "india infoline"]);
+    patterns
+});
+
+// =============================================================================
+// SLOT EXTRACTOR
+// =============================================================================
+
+/// Slot extractor for gold loan domain
+///
+/// Uses static regex patterns compiled at program start for efficiency.
+/// All patterns are stored as module-level statics using `once_cell::sync::Lazy`.
+#[derive(Debug, Clone)]
+pub struct SlotExtractor {
+    // Unit struct - all patterns are static
+    _private: (),
+}
+
 impl SlotExtractor {
     /// Create a new slot extractor
+    ///
+    /// All patterns are static and compiled once at program start,
+    /// so this is a very cheap operation.
     pub fn new() -> Self {
-        Self {
-            amount_patterns: Self::build_amount_patterns(),
-            weight_patterns: Self::build_weight_patterns(),
-            phone_patterns: Self::build_phone_patterns(),
-            pincode_patterns: Self::build_pincode_patterns(),
-            time_patterns: Self::build_time_patterns(),
-            lender_patterns: Self::build_lender_patterns(),
-            name_patterns: Self::build_name_patterns(),
-            pan_patterns: Self::build_pan_patterns(),
-            dob_patterns: Self::build_dob_patterns(),
-            purpose_patterns: Self::build_purpose_patterns(),
-            repayment_patterns: Self::build_repayment_patterns(),
-            city_patterns: Self::build_city_patterns(),
-            intent_patterns: Self::build_intent_patterns(),
-        }
-    }
-
-    fn build_amount_patterns() -> Vec<(Regex, AmountMultiplier)> {
-        vec![
-            // Crore patterns
-            (Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:crore|cr|करोड़)").unwrap(), AmountMultiplier::Crore),
-            // Lakh patterns (English and Hindi)
-            (Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:lakh|lac|लाख)").unwrap(), AmountMultiplier::Lakh),
-            // Thousand patterns
-            (Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:thousand|k|हज़ार|hazar)").unwrap(), AmountMultiplier::Thousand),
-            // Direct rupee amounts
-            (Regex::new(r"(?:₹|rs\.?|rupees?)\s*(\d+(?:,\d+)*)").unwrap(), AmountMultiplier::Unit),
-            // Plain large numbers (5-8 digits, avoiding phone numbers)
-            // Phone numbers are 10 digits starting with 6-9, so we limit to 8 digits max
-            (Regex::new(r"\b(\d{5,8})\b").unwrap(), AmountMultiplier::Unit),
-        ]
-    }
-
-    fn build_weight_patterns() -> Vec<Regex> {
-        vec![
-            // Grams patterns
-            Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:grams?|gm|g|ग्राम)").unwrap(),
-            // Tola patterns (1 tola ≈ 11.66g)
-            Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:tola|तोला)").unwrap(),
-            // Contextual weight (e.g., "I have 50 grams gold")
-            Regex::new(r"(?i)(?:have|hai|है)\s*(\d+(?:\.\d+)?)\s*(?:grams?|g)?\s*(?:gold|sona|सोना)").unwrap(),
-        ]
-    }
-
-    fn build_phone_patterns() -> Vec<Regex> {
-        vec![
-            // Indian mobile numbers (10 digits starting with 6-9)
-            Regex::new(r"\b([6-9]\d{9})\b").unwrap(),
-            // With country code
-            Regex::new(r"(?:\+91|91)?[-\s]?([6-9]\d{9})\b").unwrap(),
-            // Formatted numbers
-            Regex::new(r"\b([6-9]\d{2})[-\s]?(\d{3})[-\s]?(\d{4})\b").unwrap(),
-        ]
-    }
-
-    fn build_pincode_patterns() -> Vec<Regex> {
-        vec![
-            // Indian pincodes (6 digits, first digit 1-9)
-            Regex::new(r"\b([1-9]\d{5})\b").unwrap(),
-            // With "pincode" keyword
-            Regex::new(r"(?i)(?:pincode|pin|पिनकोड)\s*(?:is|hai|है)?\s*(\d{6})").unwrap(),
-        ]
-    }
-
-    fn build_time_patterns() -> Vec<Regex> {
-        vec![
-            // Time formats
-            Regex::new(r"(?i)(\d{1,2})(?::(\d{2}))?\s*(am|pm|बजे)").unwrap(),
-            // Time slots
-            Regex::new(r"(?i)(morning|afternoon|evening|subah|dopahar|shaam)").unwrap(),
-        ]
-    }
-
-    fn build_lender_patterns() -> HashMap<String, Vec<String>> {
-        let mut patterns = HashMap::new();
-
-        patterns.insert("muthoot".to_string(), vec![
-            "muthoot".to_string(),
-            "muthut".to_string(),
-            "muthoot finance".to_string(),
-        ]);
-
-        patterns.insert("manappuram".to_string(), vec![
-            "manappuram".to_string(),
-            "manapuram".to_string(),
-            "manappuram gold".to_string(),
-        ]);
-
-        patterns.insert("hdfc".to_string(), vec![
-            "hdfc".to_string(),
-            "hdfc bank".to_string(),
-        ]);
-
-        patterns.insert("icici".to_string(), vec![
-            "icici".to_string(),
-            "icici bank".to_string(),
-        ]);
-
-        patterns.insert("sbi".to_string(), vec![
-            "sbi".to_string(),
-            "state bank".to_string(),
-        ]);
-
-        patterns.insert("kotak".to_string(), vec![
-            "kotak".to_string(),
-            "kotak mahindra".to_string(),
-        ]);
-
-        patterns.insert("axis".to_string(), vec![
-            "axis".to_string(),
-            "axis bank".to_string(),
-        ]);
-
-        patterns.insert("federal".to_string(), vec![
-            "federal".to_string(),
-            "federal bank".to_string(),
-        ]);
-
-        patterns.insert("iifl".to_string(), vec![
-            "iifl".to_string(),
-            "india infoline".to_string(),
-        ]);
-
-        patterns
-    }
-
-    fn build_name_patterns() -> Vec<Regex> {
-        vec![
-            // English patterns: "my name is X", "I am X", "this is X", "I'm X"
-            Regex::new(r"(?i)(?:my\s+name\s+is|i\s+am|i'm|this\s+is|call\s+me)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)").unwrap(),
-            // Hindi patterns: "mera naam X hai" - capture name before hai
-            Regex::new(r"(?i)(?:mera\s+)?(?:naam|name)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]*)?)\s+(?:hai|h)\b").unwrap(),
-            // Hindi patterns without hai: "mera naam X", "naam X"
-            Regex::new(r"(?i)(?:mera\s+)?(?:naam|name)\s+([A-Z][a-zA-Z]+)(?:\s+[A-Z][a-zA-Z]+)?(?:\s|$|[.,])").unwrap(),
-            // Simple name after introduction keywords
-            Regex::new(r"(?i)(?:myself|name[:\s]+)\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)").unwrap(),
-        ]
-    }
-
-    fn build_pan_patterns() -> Vec<Regex> {
-        vec![
-            // Standard PAN format: 5 letters + 4 digits + 1 letter (e.g., ABCDE1234F)
-            Regex::new(r"(?i)(?:pan|pan\s+(?:card|number|no\.?)|my\s+pan)\s*(?:is|:)?\s*([A-Z]{5}[0-9]{4}[A-Z])").unwrap(),
-            // Just PAN number mentioned
-            Regex::new(r"\b([A-Z]{5}[0-9]{4}[A-Z])\b").unwrap(),
-            // Numeric PAN (for users who say just digits - we'll capture but flag as incomplete)
-            Regex::new(r"(?i)pan\s+(?:is|:)?\s*(\d{8,10})").unwrap(),
-        ]
-    }
-
-    fn build_dob_patterns() -> Vec<Regex> {
-        vec![
-            // Standard date formats: DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
-            Regex::new(r"(?i)(?:date\s+of\s+birth|dob|born\s+on|birthday)\s*(?:is|:)?\s*(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})").unwrap(),
-            // Written format: 25 February 1993, 25th Feb 1993
-            Regex::new(r"(?i)(?:date\s+of\s+birth|dob|born\s+on|birthday)\s*(?:is|:)?\s*(\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{2,4})").unwrap(),
-            // Hindi format: 25 February 1993
-            Regex::new(r"(?i)(?:janam\s+din|janam\s+tithi)\s*(?:hai|:)?\s*(\d{1,2}\s+\w+\s+\d{2,4})").unwrap(),
-        ]
-    }
-
-    /// Build patterns for loan purpose extraction
-    fn build_purpose_patterns() -> Vec<(Regex, String)> {
-        vec![
-            // Business purposes
-            (Regex::new(r"(?i)(?:business|dhandha|vyapaar|karobar|shop|dukaan)").unwrap(), "business".to_string()),
-            (Regex::new(r"(?i)(?:working\s+capital|stock|inventory|माल)").unwrap(), "business_working_capital".to_string()),
-            // Medical emergencies
-            (Regex::new(r"(?i)(?:medical|hospital|doctor|treatment|ilaj|ilaaj|dawai|medicine|surgery|operation)").unwrap(), "medical".to_string()),
-            // Education
-            (Regex::new(r"(?i)(?:education|school|college|fees|padhai|study|exam|admission)").unwrap(), "education".to_string()),
-            // Wedding/marriage
-            (Regex::new(r"(?i)(?:wedding|marriage|shaadi|shadi|vivah|byah)").unwrap(), "wedding".to_string()),
-            // Home renovation
-            (Regex::new(r"(?i)(?:renovation|repair|construction|ghar|home\s+improvement|makaan)").unwrap(), "home_renovation".to_string()),
-            // Agriculture
-            (Regex::new(r"(?i)(?:farming|agriculture|khet|kheti|crop|fasal|tractor|seeds|beej)").unwrap(), "agriculture".to_string()),
-            // Debt consolidation
-            (Regex::new(r"(?i)(?:debt|loan\s+repay|karza|karz|EMI\s+pay)").unwrap(), "debt_consolidation".to_string()),
-            // Emergency/urgent
-            (Regex::new(r"(?i)(?:emergency|urgent|zaruri|jaldi|turant|immediately)").unwrap(), "emergency".to_string()),
-        ]
-    }
-
-    /// Build patterns for repayment type preferences
-    fn build_repayment_patterns() -> Vec<(Regex, String)> {
-        vec![
-            // EMI preference
-            (Regex::new(r"(?i)(?:EMI|monthly\s+(?:payment|installment)|mahina|kishte)").unwrap(), "emi".to_string()),
-            // Bullet repayment
-            (Regex::new(r"(?i)(?:bullet|lump\s*sum|one\s+time|ek\s+baar|ekmusht)").unwrap(), "bullet".to_string()),
-            // Overdraft
-            (Regex::new(r"(?i)(?:overdraft|OD|credit\s+line|flexible)").unwrap(), "overdraft".to_string()),
-            // Interest only
-            (Regex::new(r"(?i)(?:interest\s+only|sirf\s+byaaj|only\s+interest)").unwrap(), "interest_only".to_string()),
-        ]
-    }
-
-    /// Build patterns for city extraction (major Indian cities)
-    fn build_city_patterns() -> Vec<Regex> {
-        vec![
-            // Direct city mentions with context
-            Regex::new(r"(?i)(?:from|in|at|near|city|sheher)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)").unwrap(),
-            // Major metros - direct match
-            Regex::new(r"(?i)\b(Mumbai|Delhi|Bangalore|Bengaluru|Chennai|Hyderabad|Kolkata|Pune|Ahmedabad|Jaipur|Lucknow|Kanpur|Nagpur|Indore|Thane|Bhopal|Visakhapatnam|Patna|Vadodara|Ghaziabad|Ludhiana|Agra|Nashik|Faridabad|Meerut|Rajkot|Kalyan|Vasai|Varanasi|Srinagar|Aurangabad|Dhanbad|Amritsar|Navi Mumbai|Allahabad|Ranchi|Howrah|Coimbatore|Jabalpur|Gwalior|Vijayawada|Jodhpur|Madurai|Raipur|Kota|Guwahati|Chandigarh|Solapur|Hubli|Mysore|Tiruchirappalli|Bareilly|Aligarh|Tiruppur|Gurgaon|Noida|NCR)\b").unwrap(),
-            // Hindi transliterations
-            Regex::new(r"(?i)\b(Dilli|Mumbay|Calcutta|Madras|Bangaluru)\b").unwrap(),
-        ]
-    }
-
-    /// Build patterns for intent detection (helps small models understand what user wants)
-    /// IMPORTANT: Order matters - more specific patterns should come first
-    fn build_intent_patterns() -> Vec<(Regex, String)> {
-        vec![
-            // Balance transfer (BEFORE savings/comparison - most specific)
-            (Regex::new(r"(?i)(?:balance\s+transfer|loan\s+transfer|transfer\s+(?:my\s+)?loan|move\s+(?:my\s+)?loan|transfer\s+kar|BT\s+kar|switch\s+(?:to|from)\s+\w+)").unwrap(), "balance_transfer".to_string()),
-            // Gold price inquiry (BEFORE rate_inquiry - more specific)
-            (Regex::new(r"(?i)(?:gold\s+(?:price|rate)|sone\s+ka\s+(?:rate|bhav|price)|aaj\s+ka\s+(?:gold\s+)?rate|today.+gold|current\s+gold)").unwrap(), "gold_price_inquiry".to_string()),
-            // Rate inquiry
-            (Regex::new(r"(?i)(?:interest\s+rate|byaaj\s+dar|rate\s+kya|kitna\s+percent|what.+(?:interest|byaaj)\s+rate)").unwrap(), "rate_inquiry".to_string()),
-            // Savings calculation
-            (Regex::new(r"(?i)(?:kitna\s+bachega|how\s+much\s+(?:can\s+i\s+)?sav|bachat|savings|save\s+money|calculate\s+saving)").unwrap(), "savings_inquiry".to_string()),
-            // Eligibility check
-            (Regex::new(r"(?i)(?:am\s+i\s+eligible|eligibility|loan\s+milega|kitna\s+loan|qualify|kya\s+mil\s+sakta|eligible\s+for)").unwrap(), "eligibility_inquiry".to_string()),
-            // Document inquiry
-            (Regex::new(r"(?i)(?:documents?\s+(?:required|needed|chahiye|list)|kya\s+laana|what\s+(?:documents?|to\s+bring)|kaunsa\s+document|laana\s+(?:hoga|padega))").unwrap(), "document_inquiry".to_string()),
-            // Appointment booking (BEFORE branch - more specific, look for action words)
-            (Regex::new(r"(?i)(?:book\s+(?:an?\s+)?appointment|schedule\s+(?:a\s+)?(?:visit|appointment)|fix\s+(?:a\s+)?time|milna\s+(?:hai|chahta)|time\s+slot|slot\s+book)").unwrap(), "appointment_request".to_string()),
-            // Branch/location inquiry
-            (Regex::new(r"(?i)(?:(?:nearest|nearby)\s+branch|branch\s+(?:location|kahan|where)|where\s+is\s+(?:the\s+)?(?:branch|office)|office\s+address|location\s+of)").unwrap(), "branch_inquiry".to_string()),
-            // Safety/security concern
-            (Regex::new(r"(?i)(?:(?:is\s+)?(?:my\s+)?gold\s+safe|security|suraksha|chori|theft|insurance|vault|locker)").unwrap(), "safety_inquiry".to_string()),
-            // Repayment inquiry
-            (Regex::new(r"(?i)(?:repay|payment\s+(?:option|method)|EMI\s+(?:kaise|how)|bhugtan|kaise\s+dena|how\s+to\s+pay|repayment)").unwrap(), "repayment_inquiry".to_string()),
-            // Closure/release
-            (Regex::new(r"(?i)(?:close\s+(?:my\s+)?loan|loan\s+close|release\s+(?:my\s+)?gold|gold\s+back|sona\s+wapas|get\s+(?:my\s+)?gold\s+back)").unwrap(), "closure_inquiry".to_string()),
-            // Human escalation
-            (Regex::new(r"(?i)(?:talk\s+to\s+(?:a\s+)?human|(?:real\s+)?agent|real\s+person|customer\s+care|complaint|shikayat|(?:speak\s+(?:to|with)\s+)?manager)").unwrap(), "human_escalation".to_string()),
-            // Callback request
-            (Regex::new(r"(?i)(?:call\s+(?:me\s+)?back|callback|phone\s+kar|give\s+(?:me\s+)?(?:a\s+)?call|ring\s+me)").unwrap(), "callback_request".to_string()),
-            // SMS request
-            (Regex::new(r"(?i)(?:send\s+(?:me\s+)?(?:sms|message|details|info)|SMS\s+kar|whatsapp\s+(?:me|kar))").unwrap(), "sms_request".to_string()),
-            // Competitor comparison (LAST - most generic, avoid triggering on mentions of competitors in other contexts)
-            (Regex::new(r"(?i)(?:compare\s+(?:with|to)|comparison|vs\s+\w+|versus|better\s+than\s+(?:muthoot|manappuram|iifl))").unwrap(), "comparison_inquiry".to_string()),
-        ]
+        Self { _private: () }
     }
 
     /// Extract all slots from an utterance
@@ -478,7 +366,7 @@ impl SlotExtractor {
     pub fn extract_amount(&self, utterance: &str) -> Option<(f64, f32)> {
         let lower = utterance.to_lowercase();
 
-        for (pattern, multiplier) in &self.amount_patterns {
+        for (pattern, multiplier) in AMOUNT_PATTERNS.iter() {
             if let Some(caps) = pattern.captures(&lower) {
                 if let Some(num_match) = caps.get(1) {
                     let num_str = num_match.as_str().replace(',', "");
@@ -530,7 +418,7 @@ impl SlotExtractor {
     pub fn extract_weight(&self, utterance: &str) -> Option<(f64, f32)> {
         let lower = utterance.to_lowercase();
 
-        for pattern in &self.weight_patterns {
+        for pattern in WEIGHT_PATTERNS.iter() {
             if let Some(caps) = pattern.captures(&lower) {
                 if let Some(num_match) = caps.get(1) {
                     if let Ok(num) = num_match.as_str().parse::<f64>() {
@@ -561,7 +449,7 @@ impl SlotExtractor {
 
     /// Extract phone number from utterance
     pub fn extract_phone(&self, utterance: &str) -> Option<(String, f32)> {
-        for pattern in &self.phone_patterns {
+        for pattern in PHONE_PATTERNS.iter() {
             if let Some(caps) = pattern.captures(utterance) {
                 // Handle formatted numbers
                 if caps.len() > 2 {
@@ -588,7 +476,7 @@ impl SlotExtractor {
 
     /// Extract pincode from utterance
     pub fn extract_pincode(&self, utterance: &str) -> Option<(String, f32)> {
-        for pattern in &self.pincode_patterns {
+        for pattern in PINCODE_PATTERNS.iter() {
             if let Some(caps) = pattern.captures(utterance) {
                 if let Some(m) = caps.get(1) {
                     let pincode = m.as_str().to_string();
@@ -614,8 +502,8 @@ impl SlotExtractor {
     pub fn extract_lender(&self, utterance: &str) -> Option<(String, f32)> {
         let lower = utterance.to_lowercase();
 
-        for (canonical, variants) in &self.lender_patterns {
-            for variant in variants {
+        for (canonical, variants) in LENDER_PATTERNS.iter() {
+            for variant in variants.iter() {
                 if lower.contains(variant) {
                     let confidence = if lower.contains("from") || lower.contains("with")
                         || lower.contains("se") || lower.contains("current")
@@ -624,7 +512,7 @@ impl SlotExtractor {
                     } else {
                         0.7
                     };
-                    return Some((canonical.clone(), confidence));
+                    return Some(((*canonical).to_string(), confidence));
                 }
             }
         }
@@ -636,23 +524,24 @@ impl SlotExtractor {
     pub fn extract_purity(&self, utterance: &str) -> Option<(String, f32)> {
         let lower = utterance.to_lowercase();
 
-        // Direct karat mentions
-        let purity_patterns = [
-            (r"24\s*(?:k|karat|carat|kt)", "24"),
-            (r"22\s*(?:k|karat|carat|kt)", "22"),
-            (r"18\s*(?:k|karat|carat|kt)", "18"),
-            (r"14\s*(?:k|karat|carat|kt)", "14"),
-            // Descriptive
-            (r"pure\s*gold", "24"),
-            (r"hallmark(?:ed)?", "22"), // Hallmarked is typically 22k in India
-        ];
-
-        for (pattern, purity) in &purity_patterns {
-            if let Ok(re) = Regex::new(&format!("(?i){}", pattern)) {
-                if re.is_match(&lower) {
-                    return Some((purity.to_string(), 0.85));
-                }
-            }
+        // Use static purity patterns
+        if PURITY_24K.is_match(&lower) {
+            return Some(("24".to_string(), 0.85));
+        }
+        if PURITY_22K.is_match(&lower) {
+            return Some(("22".to_string(), 0.85));
+        }
+        if PURITY_18K.is_match(&lower) {
+            return Some(("18".to_string(), 0.85));
+        }
+        if PURITY_14K.is_match(&lower) {
+            return Some(("14".to_string(), 0.85));
+        }
+        if PURITY_PURE.is_match(&lower) {
+            return Some(("24".to_string(), 0.85));
+        }
+        if PURITY_HALLMARK.is_match(&lower) {
+            return Some(("22".to_string(), 0.85)); // Hallmarked is typically 22k in India
         }
 
         None
@@ -730,18 +619,12 @@ impl SlotExtractor {
             }
         }
 
-        // Try to extract location after keywords
-        let location_patterns = [
-            Regex::new(r"(?i)(?:from|in|at|near|mein|में)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)").unwrap(),
-        ];
-
-        for pattern in &location_patterns {
-            if let Some(caps) = pattern.captures(utterance) {
-                if let Some(m) = caps.get(1) {
-                    let location = m.as_str().to_string();
-                    if location.len() >= 3 && location.len() <= 30 {
-                        return Some((location, 0.6));
-                    }
+        // Try to extract location after keywords using static pattern
+        if let Some(caps) = LOCATION_PATTERN.captures(utterance) {
+            if let Some(m) = caps.get(1) {
+                let location = m.as_str().to_string();
+                if location.len() >= 3 && location.len() <= 30 {
+                    return Some((location, 0.6));
                 }
             }
         }
@@ -753,9 +636,8 @@ impl SlotExtractor {
     pub fn extract_tenure(&self, utterance: &str) -> Option<(u32, f32)> {
         let lower = utterance.to_lowercase();
 
-        // Month patterns
-        let month_pattern = Regex::new(r"(\d+)\s*(?:months?|mahine|महीने)").unwrap();
-        if let Some(caps) = month_pattern.captures(&lower) {
+        // Month patterns using static pattern
+        if let Some(caps) = TENURE_MONTHS.captures(&lower) {
             if let Some(m) = caps.get(1) {
                 if let Ok(months) = m.as_str().parse::<u32>() {
                     if months >= 1 && months <= 60 {
@@ -765,9 +647,8 @@ impl SlotExtractor {
             }
         }
 
-        // Year patterns
-        let year_pattern = Regex::new(r"(\d+)\s*(?:years?|saal|साल)").unwrap();
-        if let Some(caps) = year_pattern.captures(&lower) {
+        // Year patterns using static pattern
+        if let Some(caps) = TENURE_YEARS.captures(&lower) {
             if let Some(m) = caps.get(1) {
                 if let Ok(years) = m.as_str().parse::<u32>() {
                     if years >= 1 && years <= 5 {
@@ -784,9 +665,8 @@ impl SlotExtractor {
     pub fn extract_interest_rate(&self, utterance: &str) -> Option<(f32, f32)> {
         let lower = utterance.to_lowercase();
 
-        // Pattern with explicit rate context
-        let rate_context_pattern = Regex::new(r"(?i)(?:interest\s+)?rate\s+(?:is|:)?\s*(\d+(?:\.\d+)?)\s*(?:%|percent|प्रतिशत)?").unwrap();
-        if let Some(caps) = rate_context_pattern.captures(&lower) {
+        // Pattern with explicit rate context using static pattern
+        if let Some(caps) = RATE_CONTEXT.captures(&lower) {
             if let Some(m) = caps.get(1) {
                 if let Ok(rate) = m.as_str().parse::<f32>() {
                     if rate >= 5.0 && rate <= 30.0 {
@@ -796,9 +676,8 @@ impl SlotExtractor {
             }
         }
 
-        // Pattern with percent symbol
-        let rate_pattern = Regex::new(r"(\d+(?:\.\d+)?)\s*(?:%|percent|प्रतिशत)").unwrap();
-        if let Some(caps) = rate_pattern.captures(&lower) {
+        // Pattern with percent symbol using static pattern
+        if let Some(caps) = RATE_PERCENT.captures(&lower) {
             if let Some(m) = caps.get(1) {
                 if let Ok(rate) = m.as_str().parse::<f32>() {
                     // Gold loan rates are typically 7-24%
@@ -814,7 +693,7 @@ impl SlotExtractor {
 
     /// Extract customer name from utterance
     pub fn extract_name(&self, utterance: &str) -> Option<(String, f32)> {
-        for pattern in &self.name_patterns {
+        for pattern in NAME_PATTERNS.iter() {
             if let Some(caps) = pattern.captures(utterance) {
                 if let Some(m) = caps.get(1) {
                     let name = m.as_str().trim().to_string();
@@ -841,7 +720,7 @@ impl SlotExtractor {
     pub fn extract_pan(&self, utterance: &str) -> Option<(String, f32)> {
         let upper = utterance.to_uppercase();
 
-        for pattern in &self.pan_patterns {
+        for pattern in PAN_PATTERNS.iter() {
             if let Some(caps) = pattern.captures(&upper) {
                 if let Some(m) = caps.get(1) {
                     let pan = m.as_str().to_string();
@@ -869,7 +748,7 @@ impl SlotExtractor {
 
     /// Extract date of birth from utterance
     pub fn extract_dob(&self, utterance: &str) -> Option<(String, f32)> {
-        for pattern in &self.dob_patterns {
+        for pattern in DOB_PATTERNS.iter() {
             if let Some(caps) = pattern.captures(utterance) {
                 if let Some(m) = caps.get(1) {
                     let dob = m.as_str().trim().to_string();
@@ -888,9 +767,9 @@ impl SlotExtractor {
     pub fn extract_repayment_type(&self, utterance: &str) -> Option<(String, f32)> {
         let lower = utterance.to_lowercase();
 
-        for (pattern, repayment_type) in &self.repayment_patterns {
+        for (pattern, repayment_type) in REPAYMENT_PATTERNS.iter() {
             if pattern.is_match(&lower) {
-                return Some((repayment_type.clone(), 0.8));
+                return Some((repayment_type.to_string(), 0.8));
             }
         }
 
@@ -900,7 +779,7 @@ impl SlotExtractor {
     /// Extract city from utterance
     pub fn extract_city(&self, utterance: &str) -> Option<(String, f32)> {
         // First try direct city patterns
-        for pattern in &self.city_patterns {
+        for pattern in CITY_PATTERNS.iter() {
             if let Some(caps) = pattern.captures(utterance) {
                 if let Some(m) = caps.get(1) {
                     let city = m.as_str().trim().to_string();
@@ -923,9 +802,9 @@ impl SlotExtractor {
         let lower = utterance.to_lowercase();
 
         // Check all intent patterns and return the first (most specific) match
-        for (pattern, intent) in &self.intent_patterns {
+        for (pattern, intent) in INTENT_PATTERNS.iter() {
             if pattern.is_match(&lower) {
-                return Some((intent.clone(), 0.8));
+                return Some((intent.to_string(), 0.8));
             }
         }
 
@@ -936,9 +815,9 @@ impl SlotExtractor {
     pub fn extract_loan_purpose(&self, utterance: &str) -> Option<(String, f32)> {
         let lower = utterance.to_lowercase();
 
-        for (pattern, purpose) in &self.purpose_patterns {
+        for (pattern, purpose) in PURPOSE_PATTERNS.iter() {
             if pattern.is_match(&lower) {
-                return Some((purpose.clone(), 0.8));
+                return Some((purpose.to_string(), 0.8));
             }
         }
 
