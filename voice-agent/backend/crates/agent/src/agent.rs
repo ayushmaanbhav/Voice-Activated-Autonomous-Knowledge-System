@@ -99,17 +99,25 @@ impl GoldLoanAgent {
 
         let conversation = Arc::new(Conversation::new(&session_id, config.conversation.clone()));
 
+        // P15 FIX: Create domain config first, used for tools and persona
+        let domain_config = Arc::new(voice_agent_config::MasterDomainConfig::default());
+        let agent_view = Arc::new(voice_agent_config::AgentDomainView::new(domain_config.clone()));
+        let tools_view = Arc::new(voice_agent_config::ToolsDomainView::new(domain_config));
+
         // Configure the conversation's agentic memory with persona settings
         // NOTE: We use conversation.agentic_memory() to avoid having two separate memory instances
         conversation.agentic_memory().core.set_persona_name(&config.persona.name);
+        // P15 FIX: Use domain config for bank name and role instead of hardcoded values
         conversation.agentic_memory().core.add_persona_goal(&format!(
-            "Represent Kotak Mahindra Bank as a Gold Loan Advisor with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
+            "Represent {} as a {} with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
+            agent_view.bank_name(),
+            agent_view.agent_role(),
             config.persona.warmth * 100.0,
             config.persona.formality * 100.0,
             config.persona.empathy * 100.0
         ));
 
-        let tools = Arc::new(voice_agent_tools::registry::create_default_registry());
+        let tools = Arc::new(voice_agent_tools::registry::create_registry_with_view(tools_view));
 
         // P1-1 FIX: Use LlmFactory for provider-agnostic LLM creation
         // Supports Claude, Ollama, OpenAI, and Azure based on config.llm_provider
@@ -274,17 +282,25 @@ impl GoldLoanAgent {
 
         let conversation = Arc::new(Conversation::new(&session_id, config.conversation.clone()));
 
+        // P15 FIX: Create domain config first, used for tools and persona
+        let domain_config = Arc::new(voice_agent_config::MasterDomainConfig::default());
+        let agent_view = Arc::new(voice_agent_config::AgentDomainView::new(domain_config.clone()));
+        let tools_view = Arc::new(voice_agent_config::ToolsDomainView::new(domain_config));
+
         // Configure the conversation's agentic memory with persona settings
         // NOTE: We use conversation.agentic_memory() to avoid having two separate memory instances
         conversation.agentic_memory().core.set_persona_name(&config.persona.name);
+        // P15 FIX: Use domain config for bank name and role instead of hardcoded values
         conversation.agentic_memory().core.add_persona_goal(&format!(
-            "Represent Kotak Mahindra Bank as a Gold Loan Advisor with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
+            "Represent {} as a {} with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
+            agent_view.bank_name(),
+            agent_view.agent_role(),
             config.persona.warmth * 100.0,
             config.persona.formality * 100.0,
             config.persona.empathy * 100.0
         ));
 
-        let tools = Arc::new(voice_agent_tools::registry::create_default_registry());
+        let tools = Arc::new(voice_agent_tools::registry::create_registry_with_view(tools_view));
 
         // Phase 11: Create Agentic RAG retriever if enabled
         let agentic_retriever = if config.rag_enabled {
@@ -363,17 +379,25 @@ impl GoldLoanAgent {
 
         let conversation = Arc::new(Conversation::new(&session_id, config.conversation.clone()));
 
+        // P15 FIX: Create domain config first, used for tools and persona
+        let domain_config = Arc::new(voice_agent_config::MasterDomainConfig::default());
+        let agent_view = Arc::new(voice_agent_config::AgentDomainView::new(domain_config.clone()));
+        let tools_view = Arc::new(voice_agent_config::ToolsDomainView::new(domain_config));
+
         // Configure the conversation's agentic memory with persona settings
         // NOTE: We use conversation.agentic_memory() to avoid having two separate memory instances
         conversation.agentic_memory().core.set_persona_name(&config.persona.name);
+        // P15 FIX: Use domain config for bank name and role instead of hardcoded values
         conversation.agentic_memory().core.add_persona_goal(&format!(
-            "Represent Kotak Mahindra Bank as a Gold Loan Advisor with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
+            "Represent {} as a {} with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
+            agent_view.bank_name(),
+            agent_view.agent_role(),
             config.persona.warmth * 100.0,
             config.persona.formality * 100.0,
             config.persona.empathy * 100.0
         ));
 
-        let tools = Arc::new(voice_agent_tools::registry::create_default_registry());
+        let tools = Arc::new(voice_agent_tools::registry::create_registry_with_view(tools_view));
 
         // Phase 11: Create Agentic RAG retriever if enabled
         // Without LLM, agentic retriever works but without query rewriting
@@ -466,7 +490,29 @@ impl GoldLoanAgent {
     }
 
     /// P8 FIX: Set domain view for config-driven values
+    ///
+    /// P13 FIX: Also reinitializes PersuasionEngine to use config-driven responses,
+    /// updates persona goal with brand names from config, and wires DST for instructions.
     pub fn with_domain_view(mut self, view: Arc<AgentDomainView>) -> Self {
+        // P13 FIX: Reinitialize persuasion engine with config-driven responses
+        self.persuasion = PersuasionEngine::from_view(&view);
+
+        // P13 FIX: Update persona goal with brand names from config
+        // This overrides the default hardcoded "Kotak Mahindra Bank" in constructors
+        let bank_name = view.bank_name();
+        let agent_role = view.agent_role();
+        self.conversation.agentic_memory().core.add_persona_goal(&format!(
+            "Represent {} as a {} with warmth: {:.0}%, formality: {:.0}%, empathy: {:.0}%",
+            bank_name,
+            agent_role,
+            self.config.persona.warmth * 100.0,
+            self.config.persona.formality * 100.0,
+            self.config.persona.empathy * 100.0
+        ));
+
+        // P13 FIX: Wire domain view to DST for config-driven instructions
+        self.dialogue_state.write().set_domain_view(view.clone());
+
         self.domain_view = Some(view);
         self
     }
@@ -768,8 +814,7 @@ impl GoldLoanAgent {
             tracing::debug!(
                 primary_intent = ?dst.state().primary_intent(),
                 filled_slots = ?dst.state().filled_slots(),
-                conversation_goal = %dst.conversation_goal(),
-                goal_completion = dst.goal_completion(),
+                goal_id = %dst.goal_id(),
                 pending = ?dst.slots_needing_confirmation(),
                 "Dialogue state updated"
             );
@@ -843,23 +888,6 @@ impl GoldLoanAgent {
         } else {
             None
         };
-
-        // Phase 12: Proactive tool triggering based on conversation goal
-        // If no tool was triggered by intent, check if we should trigger based on collected slots
-        if tool_result.is_none() && self.config.tools_enabled {
-            let proactive_tool = {
-                let dst = self.dialogue_state.read();
-                dst.should_trigger_tool()
-            };
-
-            if let Some(tool_name) = proactive_tool {
-                tracing::info!(
-                    tool = %tool_name,
-                    "Proactively triggering tool based on goal completion"
-                );
-                tool_result = self.call_tool_by_name(&tool_name, &intent).await?;
-            }
-        }
 
         // Phase 12: Auto-capture lead when we have contact info (runs independently of main tool)
         // This ensures we capture leads even when serving other goals like balance transfer
@@ -1300,15 +1328,13 @@ impl GoldLoanAgent {
                 builder = builder.with_context(&format!("## Customer Facts from Memory\n{}", facts_str));
             }
 
-            // Phase 12: Add conversation goal context with next best action
-            let goal_context = dst.goal_context();
-            builder = builder.with_context(&goal_context);
+            // Phase 12: Add goal ID to context
+            let goal_id = dst.goal_id();
+            builder = builder.with_context(&format!("Current Goal: {}", goal_id));
 
             // Log goal tracking for debugging
             tracing::debug!(
-                goal = %dst.conversation_goal(),
-                completion = dst.goal_completion(),
-                next_action = ?dst.get_next_action(),
+                goal = %goal_id,
                 "Goal context added to prompt"
             );
         }
@@ -2211,10 +2237,16 @@ impl GoldLoanAgent {
                 }
             },
             ConversationStage::Presentation => {
-                if is_english {
-                    "At Kotak, we offer just 10.5% interest rate, which is much lower than the 18-20% NBFCs charge. Plus, you get the security of an RBI regulated bank. Would you be interested?".to_string()
+                // P13 FIX: Get rates from config if available
+                let (our_rate, nbfc_rate) = if let Some(view) = &self.domain_view {
+                    (view.our_rate_for_amount(500_000.0), view.get_competitor_rate("muthoot").unwrap_or(18.0))
                 } else {
-                    "Dekhiye, Kotak mein aapko sirf 10.5% rate milega, jo NBFC ke 18-20% se bahut kam hai. Aur hamare yahan RBI regulated bank ki security bhi hai. Aap interested hain?".to_string()
+                    (10.5, 18.0)
+                };
+                if is_english {
+                    format!("At Kotak, we offer just {:.1}% interest rate, which is much lower than the {:.0}-{:.0}% NBFCs charge. Plus, you get the security of an RBI regulated bank. Would you be interested?", our_rate, nbfc_rate, nbfc_rate + 2.0)
+                } else {
+                    format!("Dekhiye, Kotak mein aapko sirf {:.1}% rate milega, jo NBFC ke {:.0}-{:.0}% se bahut kam hai. Aur hamare yahan RBI regulated bank ki security bhi hai. Aap interested hain?", our_rate, nbfc_rate, nbfc_rate + 2.0)
                 }
             },
             ConversationStage::ObjectionHandling => {

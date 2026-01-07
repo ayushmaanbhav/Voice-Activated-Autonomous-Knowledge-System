@@ -1,6 +1,15 @@
 //! Conversation Management
 //!
 //! Manages the overall conversation flow and state.
+//!
+//! ## Phase 2 (Domain-Agnosticism): ConversationContext Trait
+//!
+//! The `ConversationContext` trait abstracts conversation management, allowing
+//! domain-agnostic agents to work with any conversation implementation. This
+//! enables:
+//! - Testing with mock conversations
+//! - Alternative memory backends
+//! - Custom stage transitions per domain
 
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
@@ -15,6 +24,127 @@ use crate::memory_legacy::{ConversationMemory, MemoryEntry};
 use crate::stage::{ConversationStage, StageManager, TransitionReason};
 use crate::AgentError;
 use voice_agent_core::{Turn, TurnRole};
+
+// =============================================================================
+// Phase 2: ConversationContext Trait (Domain-Agnostic Abstraction)
+// =============================================================================
+
+/// Trait for conversation context abstraction
+///
+/// This trait allows domain-agnostic agents to work with any conversation
+/// implementation. Implementations must be thread-safe (Send + Sync).
+///
+/// # Example
+/// ```ignore
+/// // Agent uses trait bound instead of concrete Conversation
+/// pub struct DomainAgent<C: ConversationContext> {
+///     conversation: Arc<C>,
+///     // ...
+/// }
+/// ```
+pub trait ConversationContext: Send + Sync {
+    /// Get session ID
+    fn session_id(&self) -> &str;
+
+    /// Get current conversation state
+    fn state(&self) -> ConversationState;
+
+    /// Get current conversation stage
+    fn stage(&self) -> ConversationStage;
+
+    /// Get conversation duration
+    fn duration(&self) -> Duration;
+
+    /// Get turn count
+    fn turn_count(&self) -> usize;
+
+    /// Check if conversation is active
+    fn is_active(&self) -> bool;
+
+    /// Add a user turn to the conversation
+    ///
+    /// Returns the detected intent from the user's input.
+    fn add_user_turn(&self, content: &str) -> Result<DetectedIntent, AgentError>;
+
+    /// Add an assistant turn to the conversation
+    fn add_assistant_turn(&self, content: &str) -> Result<(), AgentError>;
+
+    /// Transition to a new conversation stage
+    fn transition_stage(&self, to: ConversationStage) -> Result<(), AgentError>;
+
+    /// Get context string for the conversation
+    fn get_context(&self) -> String;
+
+    /// Get context optimized for a specific query with token budget
+    fn get_context_for_query(&self, query: &str, max_tokens: usize) -> String;
+
+    /// Get access to agentic memory
+    fn agentic_memory(&self) -> &Arc<AgenticMemory>;
+
+    /// Get legacy memory reference
+    fn memory(&self) -> &ConversationMemory;
+
+    /// Get legacy memory Arc for async operations
+    fn memory_arc(&self) -> Arc<ConversationMemory>;
+
+    /// Get stage manager reference
+    fn stage_manager(&self) -> &StageManager;
+
+    /// Record a fact in memory
+    fn record_fact(&self, key: &str, value: &str, confidence: f32);
+
+    /// Get recent messages for LLM context
+    fn get_messages(&self) -> Vec<(String, String)>;
+
+    /// Get stage guidance text
+    fn get_stage_guidance(&self) -> &'static str;
+
+    /// Get suggested questions for current stage
+    fn get_suggested_questions(&self) -> Vec<&'static str>;
+
+    /// End the conversation
+    fn end(&self, reason: EndReason);
+
+    /// Pause the conversation
+    fn pause(&self);
+
+    /// Resume the conversation
+    fn resume(&self);
+
+    // =========================================================================
+    // Compliance Methods (RBI Requirements)
+    // =========================================================================
+
+    /// Get compliance status
+    fn compliance(&self) -> ComplianceStatus;
+
+    /// Check if AI disclosure has been given
+    fn ai_disclosure_given(&self) -> bool;
+
+    /// Mark AI disclosure as given, returns disclosure message
+    fn mark_ai_disclosed(&self) -> String;
+
+    /// Record recording consent
+    fn record_recording_consent(&self, given: bool, method: ConsentMethod);
+
+    /// Record PII processing consent
+    fn record_pii_consent(&self, given: bool, method: ConsentMethod);
+
+    /// Check if conversation is compliant
+    fn is_compliant(&self) -> bool;
+
+    /// Check if PII processing is allowed
+    fn can_process_pii(&self) -> bool;
+
+    /// Get pending compliance requirements
+    fn pending_compliance(&self) -> Vec<String>;
+
+    /// Get AI disclosure message for configured language
+    fn get_ai_disclosure_message(&self) -> String;
+
+    /// Subscribe to conversation events
+    fn subscribe(&self) -> broadcast::Receiver<ConversationEvent>;
+}
 
 /// Conversation configuration
 #[derive(Debug, Clone)]
@@ -799,6 +929,144 @@ impl Conversation {
     /// Get AI disclosure message for the configured language
     pub fn get_ai_disclosure_message(&self) -> String {
         AiDisclosure::get_disclosure_message(&self.config.language).to_string()
+    }
+}
+
+// =============================================================================
+// Phase 2: ConversationContext Implementation for Conversation
+// =============================================================================
+
+impl ConversationContext for Conversation {
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    fn state(&self) -> ConversationState {
+        *self.state.lock()
+    }
+
+    fn stage(&self) -> ConversationStage {
+        self.stage_manager.current()
+    }
+
+    fn duration(&self) -> Duration {
+        self.start_time.elapsed()
+    }
+
+    fn turn_count(&self) -> usize {
+        *self.turn_count.lock()
+    }
+
+    fn is_active(&self) -> bool {
+        *self.state.lock() == ConversationState::Active
+    }
+
+    fn add_user_turn(&self, content: &str) -> Result<DetectedIntent, AgentError> {
+        Conversation::add_user_turn(self, content)
+    }
+
+    fn add_assistant_turn(&self, content: &str) -> Result<(), AgentError> {
+        Conversation::add_assistant_turn(self, content)
+    }
+
+    fn transition_stage(&self, to: ConversationStage) -> Result<(), AgentError> {
+        Conversation::transition_stage(self, to)
+    }
+
+    fn get_context(&self) -> String {
+        self.memory.get_context()
+    }
+
+    fn get_context_for_query(&self, query: &str, max_tokens: usize) -> String {
+        self.agentic_memory.get_context_for_query(query, max_tokens)
+    }
+
+    fn agentic_memory(&self) -> &Arc<AgenticMemory> {
+        &self.agentic_memory
+    }
+
+    fn memory(&self) -> &ConversationMemory {
+        &self.memory
+    }
+
+    fn memory_arc(&self) -> Arc<ConversationMemory> {
+        Arc::clone(&self.memory)
+    }
+
+    fn stage_manager(&self) -> &StageManager {
+        &self.stage_manager
+    }
+
+    fn record_fact(&self, key: &str, value: &str, confidence: f32) {
+        Conversation::record_fact(self, key, value, confidence)
+    }
+
+    fn get_messages(&self) -> Vec<(String, String)> {
+        self.memory.get_recent_messages()
+    }
+
+    fn get_stage_guidance(&self) -> &'static str {
+        self.stage().guidance()
+    }
+
+    fn get_suggested_questions(&self) -> Vec<&'static str> {
+        self.stage().suggested_questions()
+    }
+
+    fn end(&self, reason: EndReason) {
+        Conversation::end(self, reason)
+    }
+
+    fn pause(&self) {
+        *self.state.lock() = ConversationState::Paused;
+    }
+
+    fn resume(&self) {
+        let mut state = self.state.lock();
+        if *state == ConversationState::Paused {
+            *state = ConversationState::Active;
+            *self.last_activity.lock() = Instant::now();
+        }
+    }
+
+    fn compliance(&self) -> ComplianceStatus {
+        self.compliance.lock().clone()
+    }
+
+    fn ai_disclosure_given(&self) -> bool {
+        self.compliance.lock().ai_disclosure.given
+    }
+
+    fn mark_ai_disclosed(&self) -> String {
+        Conversation::mark_ai_disclosed(self)
+    }
+
+    fn record_recording_consent(&self, given: bool, method: ConsentMethod) {
+        Conversation::record_recording_consent(self, given, method)
+    }
+
+    fn record_pii_consent(&self, given: bool, method: ConsentMethod) {
+        Conversation::record_pii_consent(self, given, method)
+    }
+
+    fn is_compliant(&self) -> bool {
+        self.compliance.lock().compliant
+    }
+
+    fn can_process_pii(&self) -> bool {
+        self.compliance.lock().can_process_pii()
+    }
+
+    fn pending_compliance(&self) -> Vec<String> {
+        self.compliance.lock().pending_requirements.clone()
+    }
+
+    fn get_ai_disclosure_message(&self) -> String {
+        Conversation::get_ai_disclosure_message(self)
+    }
+
+    fn subscribe(&self) -> broadcast::Receiver<ConversationEvent> {
+        self.event_tx.subscribe()
     }
 }
 

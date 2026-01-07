@@ -29,6 +29,44 @@ impl AgentDomainView {
         Self { config }
     }
 
+    // ====== Brand Information ======
+
+    /// P13 FIX: Get bank name for persona goal
+    pub fn bank_name(&self) -> &str {
+        &self.config.brand.bank_name
+    }
+
+    /// P13 FIX: Get agent name
+    pub fn agent_name(&self) -> &str {
+        &self.config.brand.agent_name
+    }
+
+    /// P13 FIX: Get agent role for persona goal (e.g., "Gold Loan Advisor")
+    /// Falls back to domain display name if not set
+    pub fn agent_role(&self) -> &str {
+        if self.config.brand.agent_role.is_empty() {
+            // Default fallback based on domain
+            "Advisor"
+        } else {
+            &self.config.brand.agent_role
+        }
+    }
+
+    /// Get helpline number
+    pub fn helpline(&self) -> &str {
+        &self.config.brand.helpline
+    }
+
+    // ====== DST Instructions ======
+
+    /// P13 FIX: Get DST instruction for an action type
+    /// Falls back to English if the language-specific instruction is not found
+    pub fn dst_instruction(&self, action_type: &str, language: &str) -> Option<&str> {
+        self.config.prompts.dst_instruction(action_type, language)
+    }
+
+    // ====== High-Value Customer Detection ======
+
     /// Get high-value thresholds for lead scoring
     pub fn high_value_amount_threshold(&self) -> f64 {
         self.config.high_value.amount_threshold
@@ -271,6 +309,43 @@ impl AgentDomainView {
     /// Build full response text for an objection
     pub fn build_objection_response(&self, objection_type: &str, language: &str) -> Option<String> {
         self.config.objections.build_full_response(objection_type, language)
+    }
+
+    // ====== Feature Configuration ======
+
+    /// Get display name for a feature in a specific language
+    pub fn feature_display_name(&self, feature_id: &str, language: &str) -> Option<&str> {
+        self.config.features.display_name(feature_id, language)
+    }
+
+    /// Get features for a segment (from features config)
+    pub fn features_for_segment(&self, segment_id: &str) -> Vec<&str> {
+        self.config.features.features_for_segment(segment_id)
+    }
+
+    /// Get top N features for a segment
+    pub fn top_features_for_segment(&self, segment_id: &str, n: usize) -> Vec<&str> {
+        self.config.features.top_features_for_segment(segment_id, n)
+    }
+
+    /// Get value propositions for a segment (from features config)
+    pub fn value_propositions_for_segment(&self, segment_id: &str) -> Vec<&str> {
+        self.config.features.value_propositions_for_segment(segment_id)
+    }
+
+    /// Get value propositions with rate substitution
+    pub fn value_propositions_with_rate(&self, segment_id: &str, rate: f64) -> Vec<String> {
+        self.config.features.value_propositions_with_rate(segment_id, rate)
+    }
+
+    /// Check if a feature exists
+    pub fn has_feature(&self, feature_id: &str) -> bool {
+        self.config.features.has_feature(feature_id)
+    }
+
+    /// Get all feature IDs
+    pub fn all_feature_ids(&self) -> Vec<&str> {
+        self.config.features.feature_ids()
     }
 
     // ====== Customer Segment Configuration ======
@@ -688,6 +763,32 @@ impl ToolsDomainView {
             .collect()
     }
 
+    /// P14 FIX: Get our features for comparison
+    pub fn our_features(&self) -> &[String] {
+        self.config.competitors_config.our_features()
+    }
+
+    /// P14 FIX: Get all competitor IDs
+    pub fn all_competitor_ids(&self) -> Vec<&str> {
+        self.config.competitors_config.competitor_ids()
+    }
+
+    /// P14 FIX: Get competitor data tuple (id, display_name, rate, ltv, strengths)
+    /// Returns all competitors as tuples for comparison tool
+    pub fn all_competitors_data(&self) -> Vec<(&str, &str, f64, f64, Vec<&str>)> {
+        self.config.competitors_config.competitors.iter()
+            .map(|(id, entry)| {
+                (
+                    id.as_str(),
+                    entry.display_name.as_str(),
+                    entry.typical_rate,
+                    entry.ltv_percent,
+                    entry.strengths.iter().map(|s| s.as_str()).collect(),
+                )
+            })
+            .collect()
+    }
+
     // ====== P7 FIX: Methods migrated from DomainConfigManager ======
 
     /// Check if doorstep service is available in a city
@@ -733,6 +834,143 @@ impl ToolsDomainView {
             our_rate,
             their_rate,
         })
+    }
+
+    // ====== P12: Methods replacing GoldLoanConfig ======
+
+    /// Calculate gold value given weight and purity
+    pub fn calculate_gold_value(&self, weight_grams: f64, purity: &str) -> f64 {
+        let purity_factor = self.purity_factor(purity);
+        weight_grams * self.gold_price_per_gram() * purity_factor
+    }
+
+    /// Calculate maximum loan amount based on gold value
+    pub fn calculate_max_loan(&self, gold_value: f64) -> f64 {
+        let max_from_ltv = gold_value * (self.ltv_percent() / 100.0);
+        max_from_ltv.min(self.max_loan_amount())
+    }
+
+    /// Get competitor rate by name (convenience method)
+    /// Falls back to default NBFC rate if competitor not found
+    pub fn get_competitor_rate(&self, lender: &str) -> f64 {
+        self.config.competitors_config.find_by_name(lender)
+            .map(|(_, entry)| entry.typical_rate)
+            .or_else(|| {
+                self.config.get_competitor(lender).map(|c| c.typical_rate)
+            })
+            .unwrap_or_else(|| self.default_competitor_rate("nbfc"))
+    }
+
+    /// Calculate monthly savings when switching from competitor
+    /// Uses the competitor's rate and our tiered rate
+    pub fn calculate_monthly_savings(&self, loan_amount: f64, current_rate: f64) -> f64 {
+        let our_rate = self.get_rate_for_amount(loan_amount);
+        let current_monthly = loan_amount * (current_rate / 100.0 / 12.0);
+        let our_monthly = loan_amount * (our_rate / 100.0 / 12.0);
+        current_monthly - our_monthly
+    }
+
+    /// Get the base/headline interest rate (for marketing purposes)
+    pub fn base_interest_rate(&self) -> f64 {
+        self.config.constants.interest_rates.base_rate
+    }
+
+    /// P15 FIX: Get rate tier name for an amount
+    /// Returns the tier name (e.g., "Standard", "Premium", "Elite")
+    /// If tier has no name, derives from tier index
+    pub fn get_rate_tier_name(&self, amount: f64) -> &str {
+        for (idx, tier) in self.config.constants.interest_rates.tiers.iter().enumerate() {
+            let threshold = tier.max_amount.unwrap_or(f64::MAX);
+            if amount <= threshold {
+                // Return tier name if set, otherwise derive from index
+                if !tier.name.is_empty() {
+                    return &tier.name;
+                }
+                // Derive tier name from index
+                return match idx {
+                    0 => "Standard",
+                    1 => "Premium",
+                    2 => "Elite",
+                    _ => "Special",
+                };
+            }
+        }
+        // Return the last tier name for amounts above all thresholds
+        self.config.constants.interest_rates.tiers
+            .last()
+            .and_then(|t| {
+                if !t.name.is_empty() {
+                    Some(t.name.as_str())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or("Elite")
+    }
+
+    /// P15 FIX: Get competitor IDs for building dynamic schema enums
+    /// Returns owned strings for use in tool schemas
+    pub fn competitor_ids(&self) -> Vec<String> {
+        self.config.competitors_config.competitor_ids()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    // ====== P15 FIX: Domain Context / Vocabulary ======
+
+    /// Get vocabulary terms for text processing
+    pub fn vocabulary_terms(&self) -> &[String] {
+        &self.config.vocabulary.terms
+    }
+
+    /// Get phrases for text processing
+    pub fn vocabulary_phrases(&self) -> &[String] {
+        &self.config.vocabulary.phrases
+    }
+
+    /// Get abbreviations as (short, full) pairs
+    pub fn vocabulary_abbreviations(&self) -> Vec<(String, String)> {
+        self.config.vocabulary.abbreviations
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
+    /// Get entity types to preserve
+    pub fn vocabulary_entities(&self) -> &[String] {
+        &self.config.vocabulary.preserve_entities
+    }
+
+    /// Get all competitor names for text processing
+    pub fn all_competitor_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        // From extended competitors config
+        for (_, entry) in &self.config.competitors_config.competitors {
+            names.push(entry.display_name.clone());
+            names.extend(entry.aliases.clone());
+        }
+        // From basic competitors in domain.yaml
+        for (_, entry) in &self.config.competitors {
+            names.push(entry.display_name.clone());
+            names.extend(entry.aliases.clone());
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// P15 FIX: Create DomainContext from config
+    /// Returns a DomainContext populated from vocabulary config
+    pub fn create_domain_context(&self) -> voice_agent_core::DomainContext {
+        voice_agent_core::DomainContext::from_config(
+            &self.config.domain_id,
+            self.vocabulary_terms().to_vec(),
+            self.vocabulary_phrases().to_vec(),
+            self.vocabulary_abbreviations(),
+            self.vocabulary_entities().to_vec(),
+            self.all_competitor_names(),
+        )
     }
 }
 

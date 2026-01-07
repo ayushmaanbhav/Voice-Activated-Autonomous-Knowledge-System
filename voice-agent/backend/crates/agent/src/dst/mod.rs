@@ -1,6 +1,14 @@
-//! Dialogue State Tracking (DST) for Gold Loan Conversations
+//! Dialogue State Tracking (DST) for Conversations
 //!
-//! Implements domain-specific dialogue state tracking based on LDST and ACL 2024 research.
+//! Implements domain-agnostic dialogue state tracking based on LDST and ACL 2024 research.
+//!
+//! ## Phase 2 (Domain-Agnosticism): DialogueStateTracking Trait
+//!
+//! The `DialogueStateTracking` trait abstracts DST operations, allowing domain-agnostic
+//! agents to work with any dialogue state implementation. This enables:
+//! - Domain-specific state structs (e.g., GoldLoanDialogueState, InsuranceDialogueState)
+//! - Testing with mock state trackers
+//! - Alternative slot extraction strategies
 //!
 //! # Features
 //!
@@ -13,7 +21,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use voice_agent_agent::dst::{DialogueStateTracker, GoldLoanDialogueState};
+//! use voice_agent_agent::dst::{DialogueStateTracker, GoldLoanDialogueState, DialogueStateTracking};
 //! use voice_agent_text_processing::intent::IntentDetector;
 //!
 //! let detector = IntentDetector::new();
@@ -30,13 +38,171 @@
 pub mod slots;
 pub mod extractor;
 
-pub use slots::{GoldLoanDialogueState, GoldPurity, SlotValue, UrgencyLevel, ConversationGoal, NextBestAction};
+pub use slots::{
+    GoldLoanDialogueState, SlotValue, UrgencyLevel, GoalId, NextBestAction, DEFAULT_GOAL,
+    // Config-driven purity types
+    PurityId, purity_ids, parse_purity_id, format_purity_display,
+};
 pub use extractor::SlotExtractor;
+// Phase 2: Re-export DialogueState trait (implemented for GoldLoanDialogueState in slots.rs)
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use voice_agent_text_processing::intent::{DetectedIntent, Slot};
+// P13 FIX: Import AgentDomainView for config-driven instructions
+use voice_agent_config::domain::AgentDomainView;
+
+// =============================================================================
+// Phase 2: DialogueStateTracking Trait (Domain-Agnostic Abstraction)
+// =============================================================================
+
+/// Trait for dialogue state abstraction
+///
+/// This trait allows domain-agnostic access to dialogue state properties.
+/// Different domains can implement their own state structs while conforming
+/// to this interface.
+pub trait DialogueState: Send + Sync {
+    /// Get the primary detected intent
+    fn primary_intent(&self) -> Option<&str>;
+
+    /// Get a slot value by name
+    fn get_slot_value(&self, slot_name: &str) -> Option<String>;
+
+    /// Set a slot value with confidence
+    fn set_slot_value(&mut self, slot_name: &str, value: &str, confidence: f32);
+
+    /// Clear a slot value
+    fn clear_slot(&mut self, slot_name: &str);
+
+    /// Get all filled slot names
+    fn filled_slots(&self) -> Vec<&str>;
+
+    /// Get pending (unconfirmed) slot names
+    fn pending_slots(&self) -> &HashSet<String>;
+
+    /// Get confirmed slot names
+    fn confirmed_slots(&self) -> &HashSet<String>;
+
+    /// Mark a slot as pending confirmation
+    fn mark_pending(&mut self, slot_name: &str);
+
+    /// Mark a slot as confirmed
+    fn mark_confirmed(&mut self, slot_name: &str);
+
+    /// Get current goal ID
+    fn goal_id(&self) -> &str;
+
+    /// Set current goal
+    fn set_goal(&mut self, goal_id: &str, turn: usize);
+
+    /// Confirm goal (user explicitly stated it)
+    fn confirm_goal(&mut self, goal_id: &str, turn: usize);
+
+    /// Check if we should auto-capture lead
+    fn should_auto_capture_lead(&self) -> bool;
+
+    /// Generate context string for prompts
+    fn to_context_string(&self) -> String;
+
+    /// Generate full context including goal information
+    fn to_full_context_string(&self) -> String;
+
+    /// Update intent with confidence
+    fn update_intent(&mut self, intent: &str, confidence: f32);
+
+    /// Get slot value with confidence
+    fn get_slot_with_confidence(&self, slot_name: &str) -> Option<&SlotValue>;
+
+    /// Get next best action for current state
+    fn next_best_action(&self) -> NextBestAction;
+}
+
+/// Trait for dialogue state tracking operations
+///
+/// This trait abstracts the dialogue state tracker, allowing domain-agnostic
+/// agents to work with any DST implementation.
+///
+/// # Example
+/// ```ignore
+/// // Agent uses trait bound instead of concrete DialogueStateTracker
+/// pub struct DomainAgent<D: DialogueStateTracking> {
+///     dst: Arc<parking_lot::RwLock<D>>,
+///     // ...
+/// }
+/// ```
+pub trait DialogueStateTracking: Send + Sync {
+    /// Type of dialogue state managed by this tracker
+    type State: DialogueState;
+
+    /// Get current dialogue state (immutable)
+    fn state(&self) -> &Self::State;
+
+    /// Get current dialogue state (mutable)
+    fn state_mut(&mut self) -> &mut Self::State;
+
+    /// Get state change history
+    fn history(&self) -> &[StateChange];
+
+    /// Update state from detected intent
+    fn update(&mut self, intent: &DetectedIntent);
+
+    /// Update a specific slot
+    fn update_slot(
+        &mut self,
+        slot_name: &str,
+        value: &str,
+        confidence: f32,
+        source: ChangeSource,
+        turn_index: usize,
+    );
+
+    /// Confirm a slot value
+    fn confirm_slot(&mut self, slot_name: &str);
+
+    /// Clear a slot value
+    fn clear_slot(&mut self, slot_name: &str);
+
+    /// Get slots needing confirmation
+    fn slots_needing_confirmation(&self) -> Vec<&str>;
+
+    /// Get confirmed slots
+    fn confirmed_slots(&self) -> Vec<&str>;
+
+    /// Check if all required slots for an intent are filled
+    fn is_intent_complete(&self, intent: &str) -> bool;
+
+    /// Get missing required slots for an intent
+    fn missing_slots_for_intent(&self, intent: &str) -> Vec<&str>;
+
+    /// Generate prompt context from current state
+    fn state_context(&self) -> String;
+
+    /// Generate full context including goal information
+    fn full_context(&self) -> String;
+
+    /// Get current conversation goal ID
+    fn goal_id(&self) -> &str;
+
+    /// Update goal from detected intent
+    fn update_goal_from_intent(&mut self, intent: &str, turn: usize);
+
+    /// Set goal explicitly
+    fn set_goal(&mut self, goal_id: &str, turn: usize);
+
+    /// Confirm goal
+    fn confirm_goal(&mut self, goal_id: &str, turn: usize);
+
+    /// Check if we should auto-capture lead
+    fn should_auto_capture_lead(&self) -> bool;
+
+    /// Reset the tracker
+    fn reset(&mut self);
+
+    /// Get instruction for an action (config-driven if domain view available)
+    fn instruction_for_action(&self, action: &NextBestAction, language: &str) -> String;
+}
 
 /// Dialogue State Tracker for Gold Loan conversations
 pub struct DialogueStateTracker {
@@ -48,6 +214,8 @@ pub struct DialogueStateTracker {
     extractor: SlotExtractor,
     /// Configuration
     config: DstConfig,
+    /// P13 FIX: Domain view for config-driven instructions (optional for backward compat)
+    domain_view: Option<Arc<AgentDomainView>>,
 }
 
 /// Configuration for DST
@@ -114,6 +282,7 @@ impl DialogueStateTracker {
             history: Vec::new(),
             extractor: SlotExtractor::new(),
             config: DstConfig::default(),
+            domain_view: None,
         }
     }
 
@@ -124,7 +293,43 @@ impl DialogueStateTracker {
             history: Vec::new(),
             extractor: SlotExtractor::new(),
             config,
+            domain_view: None,
         }
+    }
+
+    /// P13 FIX: Set domain view for config-driven instructions
+    pub fn with_domain_view(mut self, view: Arc<AgentDomainView>) -> Self {
+        self.domain_view = Some(view);
+        self
+    }
+
+    /// P13 FIX: Set domain view (mutable reference version)
+    pub fn set_domain_view(&mut self, view: Arc<AgentDomainView>) {
+        self.domain_view = Some(view);
+    }
+
+    /// P13 FIX: Get instruction for an action, using config if available
+    /// Falls back to hardcoded instructions if domain view is not set
+    pub fn instruction_for_action(&self, action: &NextBestAction, language: &str) -> String {
+        if let Some(ref view) = self.domain_view {
+            // Try to get config-driven instruction
+            let action_type = match action {
+                NextBestAction::ExplainProcess => "explain_process",
+                NextBestAction::DiscoverIntent => "discover_intent",
+                NextBestAction::OfferAppointment => "offer_appointment",
+                NextBestAction::CaptureLead => "capture_lead",
+                _ => "", // CallTool and AskFor are dynamic, use fallback
+            };
+
+            if !action_type.is_empty() {
+                if let Some(instruction) = view.dst_instruction(action_type, language) {
+                    return instruction.to_string();
+                }
+            }
+        }
+
+        // Fallback to hardcoded instructions
+        action.to_instruction()
     }
 
     /// Get current dialogue state
@@ -365,39 +570,35 @@ impl DialogueStateTracker {
         self.state.to_full_context_string()
     }
 
-    /// Get current conversation goal
-    pub fn conversation_goal(&self) -> ConversationGoal {
-        self.state.conversation_goal()
+    /// Get current conversation goal ID
+    pub fn goal_id(&self) -> &str {
+        self.state.goal_id()
     }
 
-    /// Update goal from detected intent
+    /// Update goal from detected intent using domain view
+    /// Falls back to using intent as goal ID if domain view not available
     pub fn update_goal_from_intent(&mut self, intent: &str, turn: usize) {
-        self.state.update_goal_from_intent(intent, turn);
+        // Use domain view to map intent to goal if available
+        if let Some(ref view) = self.domain_view {
+            if let Some(goal_id) = view.goal_for_intent(intent) {
+                self.state.set_goal(goal_id, turn);
+                return;
+            }
+        }
+        // Fallback: use intent as goal ID if it's not exploration
+        if intent != "unknown" && intent != "exploration" {
+            self.state.set_goal(intent, turn);
+        }
     }
 
-    /// Get the next best action based on current goal and slots
-    pub fn get_next_action(&self) -> NextBestAction {
-        self.state.get_next_action()
+    /// Set goal explicitly
+    pub fn set_goal(&mut self, goal_id: &str, turn: usize) {
+        self.state.set_goal(goal_id, turn);
     }
 
-    /// Check if we should proactively trigger a tool
-    pub fn should_trigger_tool(&self) -> Option<String> {
-        self.state.should_trigger_tool()
-    }
-
-    /// Get the goal context for LLM prompt injection
-    pub fn goal_context(&self) -> String {
-        self.state.goal_context()
-    }
-
-    /// Get missing required slots for current goal
-    pub fn missing_required_slots(&self) -> Vec<&'static str> {
-        self.state.missing_required_slots()
-    }
-
-    /// Get goal completion percentage
-    pub fn goal_completion(&self) -> f32 {
-        self.state.goal_completion()
+    /// Confirm goal (user explicitly stated it)
+    pub fn confirm_goal(&mut self, goal_id: &str, turn: usize) {
+        self.state.confirm_goal(goal_id, turn);
     }
 
     /// Check if we should auto-capture lead (when we have contact info during any goal)
@@ -415,6 +616,101 @@ impl DialogueStateTracker {
 impl Default for DialogueStateTracker {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// =============================================================================
+// Phase 2: DialogueStateTracking Implementation for DialogueStateTracker
+// =============================================================================
+
+impl DialogueStateTracking for DialogueStateTracker {
+    type State = GoldLoanDialogueState;
+
+    fn state(&self) -> &Self::State {
+        &self.state
+    }
+
+    fn state_mut(&mut self) -> &mut Self::State {
+        &mut self.state
+    }
+
+    fn history(&self) -> &[StateChange] {
+        &self.history
+    }
+
+    fn update(&mut self, intent: &DetectedIntent) {
+        DialogueStateTracker::update(self, intent)
+    }
+
+    fn update_slot(
+        &mut self,
+        slot_name: &str,
+        value: &str,
+        confidence: f32,
+        source: ChangeSource,
+        turn_index: usize,
+    ) {
+        DialogueStateTracker::update_slot(self, slot_name, value, confidence, source, turn_index)
+    }
+
+    fn confirm_slot(&mut self, slot_name: &str) {
+        DialogueStateTracker::confirm_slot(self, slot_name)
+    }
+
+    fn clear_slot(&mut self, slot_name: &str) {
+        DialogueStateTracker::clear_slot(self, slot_name)
+    }
+
+    fn slots_needing_confirmation(&self) -> Vec<&str> {
+        DialogueStateTracker::slots_needing_confirmation(self)
+    }
+
+    fn confirmed_slots(&self) -> Vec<&str> {
+        DialogueStateTracker::confirmed_slots(self)
+    }
+
+    fn is_intent_complete(&self, intent: &str) -> bool {
+        DialogueStateTracker::is_intent_complete(self, intent)
+    }
+
+    fn missing_slots_for_intent(&self, intent: &str) -> Vec<&str> {
+        DialogueStateTracker::missing_slots_for_intent(self, intent)
+    }
+
+    fn state_context(&self) -> String {
+        DialogueStateTracker::state_context(self)
+    }
+
+    fn full_context(&self) -> String {
+        DialogueStateTracker::full_context(self)
+    }
+
+    fn goal_id(&self) -> &str {
+        DialogueStateTracker::goal_id(self)
+    }
+
+    fn update_goal_from_intent(&mut self, intent: &str, turn: usize) {
+        DialogueStateTracker::update_goal_from_intent(self, intent, turn)
+    }
+
+    fn set_goal(&mut self, goal_id: &str, turn: usize) {
+        DialogueStateTracker::set_goal(self, goal_id, turn)
+    }
+
+    fn confirm_goal(&mut self, goal_id: &str, turn: usize) {
+        DialogueStateTracker::confirm_goal(self, goal_id, turn)
+    }
+
+    fn should_auto_capture_lead(&self) -> bool {
+        DialogueStateTracker::should_auto_capture_lead(self)
+    }
+
+    fn reset(&mut self) {
+        DialogueStateTracker::reset(self)
+    }
+
+    fn instruction_for_action(&self, action: &NextBestAction, language: &str) -> String {
+        DialogueStateTracker::instruction_for_action(self, action, language)
     }
 }
 

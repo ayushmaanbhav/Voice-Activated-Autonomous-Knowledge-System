@@ -51,9 +51,8 @@ pub use mcp::{
     ToolSchema,
 };
 pub use registry::{
-    // P0-4 FIX: Domain config wiring with hot-reload
-    create_registry_with_config,
-    create_registry_with_domain_config,
+    // P13 FIX: Domain config wiring via ToolsDomainView
+    create_registry_with_view,
     create_registry_with_integrations,
     create_registry_with_persistence,
     ConfigurableToolRegistry,

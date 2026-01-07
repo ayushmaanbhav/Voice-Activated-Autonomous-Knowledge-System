@@ -40,7 +40,11 @@ pub mod intent {
     pub use voice_agent_text_processing::intent::*;
 }
 
-pub use conversation::{Conversation, ConversationConfig, ConversationEvent};
+// Phase 2: Export ConversationContext trait for domain-agnostic agents
+pub use conversation::{
+    Conversation, ConversationConfig, ConversationContext, ConversationEvent,
+    ConversationState, EndReason, ComplianceStatus, ConsentMethod, AiDisclosure, ConsentRecord,
+};
 pub use memory::MemoryConfig;
 // Context compression types
 pub use memory::{CompressionLevel, CompressionMethod, CompressionStats};
@@ -66,9 +70,10 @@ pub use agent_config::{
     AgentConfig, AgentEvent, PersonaTraits, SmallModelConfig, SpeculativeDecodingConfig,
     ToolDefaults, is_small_model,
 };
+// Phase 2: PersuasionStrategy trait for domain-agnostic persuasion handling
 pub use persuasion::{
     CompetitorComparison, ObjectionResponse, ObjectionType, PersuasionEngine, PersuasionScript,
-    SwitchSavings, ValueProposition,
+    PersuasionStrategy, SwitchSavings, ValueProposition,
 };
 pub use voice_session::{VoiceSession, VoiceSessionConfig, VoiceSessionEvent, VoiceSessionState};
 // P1-1 FIX: Export Agent traits
@@ -76,9 +81,14 @@ pub use traits::{Agent, PersonalizableAgent, PrefetchingAgent};
 // P3 FIX: Export FSM adapter
 pub use fsm_adapter::{create_fsm_adapter, StageManagerAdapter};
 // Phase 5: Export DST types
+// Phase 2: DialogueState and DialogueStateTracking traits for domain-agnostic agents
 pub use dst::{
-    ChangeSource, DialogueStateTracker, DstConfig, GoldLoanDialogueState, GoldPurity, SlotExtractor,
+    ChangeSource, DialogueStateTracker, DstConfig, GoldLoanDialogueState, SlotExtractor,
     SlotValue, StateChange, UrgencyLevel,
+    // Phase 2: Domain-agnostic traits
+    DialogueState, DialogueStateTracking,
+    // Config-driven purity types
+    PurityId, purity_ids, parse_purity_id, format_purity_display,
 };
 // Phase 10: Export Lead Scoring types
 pub use lead_scoring::{

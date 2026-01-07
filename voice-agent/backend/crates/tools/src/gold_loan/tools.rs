@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use chrono::{NaiveDate, Utc};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use voice_agent_config::GoldLoanConfig;
+use voice_agent_config::ToolsDomainView;
 
 use crate::mcp::{InputSchema, PropertySchema, Tool, ToolError, ToolOutput, ToolSchema};
 
@@ -18,19 +18,45 @@ use super::branches::{get_branches, BranchData};
 use super::utils::{calculate_emi, calculate_total_interest};
 
 /// Check eligibility tool
+/// P13 FIX: Uses ToolsDomainView instead of GoldLoanConfig
+/// P15 FIX: ToolsDomainView is now REQUIRED - no more hardcoded fallbacks
 pub struct EligibilityCheckTool {
-    config: GoldLoanConfig,
+    view: Arc<ToolsDomainView>,
 }
 
 impl EligibilityCheckTool {
-    pub fn new() -> Self {
-        Self {
-            config: GoldLoanConfig::default(),
-        }
+    /// Create with required ToolsDomainView - domain config is mandatory
+    pub fn new(view: Arc<ToolsDomainView>) -> Self {
+        Self { view }
     }
 
-    pub fn with_config(config: GoldLoanConfig) -> Self {
-        Self { config }
+    /// Alias for new() for backwards compatibility during migration
+    pub fn with_view(view: Arc<ToolsDomainView>) -> Self {
+        Self::new(view)
+    }
+
+    fn get_rate(&self, amount: f64) -> f64 {
+        self.view.get_rate_for_amount(amount)
+    }
+
+    fn get_ltv(&self) -> f64 {
+        self.view.ltv_percent()
+    }
+
+    fn get_min_loan(&self) -> f64 {
+        self.view.min_loan_amount()
+    }
+
+    fn get_processing_fee(&self) -> f64 {
+        self.view.processing_fee_percent()
+    }
+
+    fn calculate_gold_value(&self, weight: f64, purity: &str) -> f64 {
+        self.view.calculate_gold_value(weight, purity)
+    }
+
+    fn calculate_max_loan(&self, gold_value: f64) -> f64 {
+        self.view.calculate_max_loan(gold_value)
     }
 }
 
@@ -87,31 +113,26 @@ impl Tool for EligibilityCheckTool {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
 
-        // Calculate eligibility using config values
-        let gold_value = self.config.calculate_gold_value(weight, purity);
-        let max_loan = self.config.calculate_max_loan(gold_value);
+        // P13 FIX: Calculate eligibility using ToolsDomainView
+        let gold_value = self.calculate_gold_value(weight, purity);
+        let max_loan = self.calculate_max_loan(gold_value);
         let available_loan = max_loan - existing_loan;
 
-        // P2 FIX: Use tiered interest rates based on loan amount
-        let interest_rate = self.config.get_tiered_rate(available_loan.max(0.0));
+        // Use tiered interest rates based on loan amount
+        let interest_rate = self.get_rate(available_loan.max(0.0));
+        let min_loan = self.get_min_loan();
 
         let result = json!({
-            "eligible": available_loan >= self.config.min_loan_amount,
+            "eligible": available_loan >= min_loan,
             "gold_value_inr": gold_value.round(),
             "max_loan_amount_inr": max_loan.round(),
             "existing_loan_inr": existing_loan,
             "available_loan_inr": available_loan.max(0.0).round(),
-            "ltv_percent": self.config.ltv_percent,
+            "ltv_percent": self.get_ltv(),
             "interest_rate_percent": interest_rate,
-            "processing_fee_percent": self.config.processing_fee_percent,
-            "rate_tier": if available_loan <= 100000.0 {
-                "Standard"
-            } else if available_loan <= 500000.0 {
-                "Premium"
-            } else {
-                "Elite"
-            },
-            "message": if available_loan >= self.config.min_loan_amount {
+            "processing_fee_percent": self.get_processing_fee(),
+            "rate_tier": self.view.get_rate_tier_name(available_loan),
+            "message": if available_loan >= min_loan {
                 format!(
                     "You are eligible for a gold loan up to ₹{:.0} at {}% interest!",
                     available_loan, interest_rate
@@ -127,26 +148,40 @@ impl Tool for EligibilityCheckTool {
     }
 }
 
-impl Default for EligibilityCheckTool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// P15 FIX: Removed Default impl - ToolsDomainView is required
 
 /// Savings calculator tool
+/// P13 FIX: Uses ToolsDomainView instead of GoldLoanConfig
+/// P15 FIX: ToolsDomainView is now REQUIRED - no more hardcoded fallbacks
 pub struct SavingsCalculatorTool {
-    config: GoldLoanConfig,
+    view: Arc<ToolsDomainView>,
 }
 
 impl SavingsCalculatorTool {
-    pub fn new() -> Self {
-        Self {
-            config: GoldLoanConfig::default(),
-        }
+    /// Create with required ToolsDomainView - domain config is mandatory
+    pub fn new(view: Arc<ToolsDomainView>) -> Self {
+        Self { view }
     }
 
-    pub fn with_config(config: GoldLoanConfig) -> Self {
-        Self { config }
+    /// Alias for new() for backwards compatibility during migration
+    pub fn with_view(view: Arc<ToolsDomainView>) -> Self {
+        Self::new(view)
+    }
+
+    fn get_rate(&self, amount: f64) -> f64 {
+        self.view.get_rate_for_amount(amount)
+    }
+
+    fn get_competitor_rate(&self, lender: &str) -> f64 {
+        self.view.get_competitor_rate(lender)
+    }
+
+    fn get_rate_tier_name(&self, amount: f64) -> &str {
+        self.view.get_rate_tier_name(amount)
+    }
+
+    fn bank_name(&self) -> &str {
+        self.view.bank_name()
     }
 }
 
@@ -157,7 +192,7 @@ impl Tool for SavingsCalculatorTool {
     }
 
     fn description(&self) -> &str {
-        "Calculate potential savings when switching from NBFC to Kotak gold loan"
+        "Calculate potential savings when switching from NBFC to our gold loan"
     }
 
     fn schema(&self) -> ToolSchema {
@@ -207,57 +242,54 @@ impl Tool for SavingsCalculatorTool {
             .and_then(|v| v.as_str())
             .unwrap_or("Other NBFC");
 
+        // P13 FIX: Use ToolsDomainView for competitor rates
         let current_rate: f64 = input
             .get("current_interest_rate")
             .and_then(|v| v.as_f64())
-            .unwrap_or_else(|| self.config.get_competitor_rate(current_lender));
+            .unwrap_or_else(|| self.get_competitor_rate(current_lender));
 
         let tenure_months: i64 = input
             .get("remaining_tenure_months")
             .and_then(|v| v.as_i64())
             .ok_or_else(|| ToolError::invalid_params("remaining_tenure_months is required"))?;
 
-        let kotak_rate = self.config.get_tiered_rate(loan_amount);
+        // P15 FIX: Use config-driven rates and bank name
+        let our_rate = self.get_rate(loan_amount);
+        let rate_tier = self.get_rate_tier_name(loan_amount);
+        let bank_name = self.bank_name();
 
         let current_emi = calculate_emi(loan_amount, current_rate, tenure_months);
-        let kotak_emi = calculate_emi(loan_amount, kotak_rate, tenure_months);
-        let emi_savings = current_emi - kotak_emi;
+        let our_emi = calculate_emi(loan_amount, our_rate, tenure_months);
+        let emi_savings = current_emi - our_emi;
 
         let current_monthly_interest = loan_amount * (current_rate / 100.0 / 12.0);
-        let kotak_monthly_interest = loan_amount * (kotak_rate / 100.0 / 12.0);
-        let monthly_interest_savings = current_monthly_interest - kotak_monthly_interest;
+        let our_monthly_interest = loan_amount * (our_rate / 100.0 / 12.0);
+        let monthly_interest_savings = current_monthly_interest - our_monthly_interest;
 
         let total_emi_savings = emi_savings * tenure_months as f64;
         let total_interest_savings =
             calculate_total_interest(loan_amount, current_rate, tenure_months)
-                - calculate_total_interest(loan_amount, kotak_rate, tenure_months);
-
-        let rate_tier = if loan_amount <= 100000.0 {
-            "Standard"
-        } else if loan_amount <= 500000.0 {
-            "Premium"
-        } else {
-            "Elite"
-        };
+                - calculate_total_interest(loan_amount, our_rate, tenure_months);
 
         let result = json!({
             "current_lender": current_lender,
             "current_interest_rate_percent": current_rate,
-            "kotak_interest_rate_percent": kotak_rate,
-            "rate_reduction_percent": current_rate - kotak_rate,
+            "our_interest_rate_percent": our_rate,
+            "rate_reduction_percent": current_rate - our_rate,
             "current_emi_inr": current_emi.round(),
-            "kotak_emi_inr": kotak_emi.round(),
+            "our_emi_inr": our_emi.round(),
             "monthly_emi_savings_inr": emi_savings.round(),
             "total_emi_savings_inr": total_emi_savings.round(),
             "current_monthly_interest_inr": current_monthly_interest.round(),
-            "kotak_monthly_interest_inr": kotak_monthly_interest.round(),
+            "our_monthly_interest_inr": our_monthly_interest.round(),
             "monthly_interest_savings_inr": monthly_interest_savings.round(),
             "total_interest_savings_inr": total_interest_savings.round(),
             "tenure_months": tenure_months,
             "rate_tier": rate_tier,
+            "bank_name": bank_name,
             "message": format!(
-                "By switching to Kotak at our {} rate of {}%, you can save ₹{:.0} per month on EMI (or ₹{:.0} on interest-only) and ₹{:.0} total over the remaining {} months!",
-                rate_tier, kotak_rate, emi_savings, monthly_interest_savings, total_emi_savings, tenure_months
+                "By switching to {} at our {} rate of {}%, you can save ₹{:.0} per month on EMI (or ₹{:.0} on interest-only) and ₹{:.0} total over the remaining {} months!",
+                bank_name, rate_tier, our_rate, emi_savings, monthly_interest_savings, total_emi_savings, tenure_months
             )
         });
 
@@ -265,11 +297,7 @@ impl Tool for SavingsCalculatorTool {
     }
 }
 
-impl Default for SavingsCalculatorTool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// P15 FIX: Removed Default impl - ToolsDomainView is required
 
 /// Lead capture tool
 pub struct LeadCaptureTool {
@@ -745,24 +773,53 @@ impl Default for BranchLocatorTool {
 }
 
 /// Get gold price tool
+/// P15 FIX: ToolsDomainView is now REQUIRED - no more hardcoded fallbacks
 pub struct GetGoldPriceTool {
     price_service: Option<Arc<dyn voice_agent_persistence::GoldPriceService>>,
-    fallback_base_price: f64,
+    view: Arc<ToolsDomainView>,
 }
 
 impl GetGoldPriceTool {
-    pub fn new() -> Self {
+    /// Create with required ToolsDomainView - domain config is mandatory
+    pub fn new(view: Arc<ToolsDomainView>) -> Self {
         Self {
             price_service: None,
-            fallback_base_price: 7500.0,
+            view,
         }
     }
 
-    pub fn with_price_service(service: Arc<dyn voice_agent_persistence::GoldPriceService>) -> Self {
+    /// Alias for new() for backwards compatibility during migration
+    pub fn with_view(view: Arc<ToolsDomainView>) -> Self {
+        Self::new(view)
+    }
+
+    /// Create with price service and required view
+    pub fn with_price_service(
+        service: Arc<dyn voice_agent_persistence::GoldPriceService>,
+        view: Arc<ToolsDomainView>,
+    ) -> Self {
         Self {
             price_service: Some(service),
-            fallback_base_price: 7500.0,
+            view,
         }
+    }
+
+    /// Alias for with_price_service - clearer naming
+    pub fn with_service_and_view(
+        service: Arc<dyn voice_agent_persistence::GoldPriceService>,
+        view: Arc<ToolsDomainView>,
+    ) -> Self {
+        Self::with_price_service(service, view)
+    }
+
+    /// Get fallback base price from config
+    fn fallback_base_price(&self) -> f64 {
+        self.view.gold_price_per_gram()
+    }
+
+    /// Get purity factor from config
+    fn purity_factor(&self, purity: &str) -> f64 {
+        self.view.purity_factor(purity)
     }
 }
 
@@ -801,6 +858,7 @@ impl Tool for GetGoldPriceTool {
         let purity = input.get("purity").and_then(|v| v.as_str());
         let weight = input.get("weight_grams").and_then(|v| v.as_f64());
 
+        // P14 FIX: Use config-driven fallback prices and purity factors
         let (price_24k, price_22k, price_18k, source) =
             if let Some(ref service) = self.price_service {
                 match service.get_current_price().await {
@@ -812,13 +870,23 @@ impl Tool for GetGoldPriceTool {
                     ),
                     Err(e) => {
                         tracing::warn!("Failed to get gold price from service: {}", e);
-                        let base = self.fallback_base_price;
-                        (base, base * 0.916, base * 0.75, "fallback".to_string())
+                        let base = self.fallback_base_price();
+                        (
+                            base * self.purity_factor("24K"),
+                            base * self.purity_factor("22K"),
+                            base * self.purity_factor("18K"),
+                            "fallback".to_string(),
+                        )
                     }
                 }
             } else {
-                let base = self.fallback_base_price;
-                (base, base * 0.916, base * 0.75, "fallback".to_string())
+                let base = self.fallback_base_price();
+                (
+                    base * self.purity_factor("24K"),
+                    base * self.purity_factor("22K"),
+                    base * self.purity_factor("18K"),
+                    "fallback".to_string(),
+                )
             };
 
         let mut result = json!({
@@ -874,11 +942,7 @@ impl Tool for GetGoldPriceTool {
     }
 }
 
-impl Default for GetGoldPriceTool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// P15 FIX: Removed Default impl - ToolsDomainView is required
 
 /// Human escalation tool
 pub struct EscalateToHumanTool {
@@ -1450,33 +1514,60 @@ impl Default for DocumentChecklistTool {
 }
 
 /// Competitor comparison tool
+/// P13 FIX: Uses ToolsDomainView instead of GoldLoanConfig
+/// P15 FIX: ToolsDomainView is now REQUIRED - no more hardcoded fallbacks
 pub struct CompetitorComparisonTool {
-    config: Option<GoldLoanConfig>,
+    view: Arc<ToolsDomainView>,
 }
 
 impl CompetitorComparisonTool {
-    pub fn new() -> Self {
-        Self { config: None }
+    /// Create with required ToolsDomainView - domain config is mandatory
+    pub fn new(view: Arc<ToolsDomainView>) -> Self {
+        Self { view }
     }
 
-    pub fn with_config(config: GoldLoanConfig) -> Self {
-        Self {
-            config: Some(config),
-        }
+    /// Alias for new() for backwards compatibility during migration
+    pub fn with_view(view: Arc<ToolsDomainView>) -> Self {
+        Self::new(view)
     }
 
-    fn get_kotak_rate(&self) -> f64 {
-        self.config
-            .as_ref()
-            .map(|c| c.kotak_interest_rate)
-            .unwrap_or(10.49)
+    fn get_our_rate(&self) -> f64 {
+        self.view.base_interest_rate()
     }
 
-    fn get_kotak_ltv(&self) -> f64 {
-        self.config
-            .as_ref()
-            .map(|c| c.ltv_percent)
-            .unwrap_or(75.0)
+    fn get_our_ltv(&self) -> f64 {
+        self.view.ltv_percent()
+    }
+
+    fn bank_name(&self) -> &str {
+        self.view.bank_name()
+    }
+
+    /// Get competitors from config - no fallback
+    fn get_competitors(&self) -> Vec<(String, String, f64, f64, Vec<String>)> {
+        self.view
+            .all_competitors_data()
+            .into_iter()
+            .map(|(id, name, rate, ltv, features)| {
+                (
+                    id.to_string(),
+                    name.to_string(),
+                    rate,
+                    ltv,
+                    features.into_iter().map(|s| s.to_string()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    /// Get competitor IDs for schema enum - from config
+    fn get_competitor_ids(&self) -> Vec<String> {
+        self.view.competitor_ids()
+    }
+
+    /// Get our features from config - no fallback
+    fn get_our_features(&self) -> Vec<String> {
+        self.view.our_features().to_vec()
     }
 }
 
@@ -1487,10 +1578,14 @@ impl Tool for CompetitorComparisonTool {
     }
 
     fn description(&self) -> &str {
-        "Compare gold loan offerings from Kotak with other major lenders including interest rates, LTV, and features"
+        "Compare our gold loan offerings with other major lenders including interest rates, LTV, and features"
     }
 
     fn schema(&self) -> ToolSchema {
+        // P15 FIX: Build competitor enum from config dynamically
+        let mut competitor_options: Vec<String> = self.get_competitor_ids();
+        competitor_options.push("all".to_string());
+
         ToolSchema {
             name: self.name().to_string(),
             description: self.description().to_string(),
@@ -1499,16 +1594,7 @@ impl Tool for CompetitorComparisonTool {
                     "competitor",
                     PropertySchema::enum_type(
                         "Competitor to compare with",
-                        vec![
-                            "muthoot".into(),
-                            "manappuram".into(),
-                            "iifl".into(),
-                            "hdfc".into(),
-                            "sbi".into(),
-                            "federal".into(),
-                            "icici".into(),
-                            "all".into(),
-                        ],
+                        competitor_options,
                     ),
                     false,
                 )
@@ -1541,82 +1627,33 @@ impl Tool for CompetitorComparisonTool {
             .and_then(|v| v.as_i64())
             .unwrap_or(12);
 
-        let competitors = vec![
-            (
-                "muthoot",
-                "Muthoot Finance",
-                12.0,
-                75.0,
-                vec!["Large branch network", "Same day disbursement"],
-            ),
-            (
-                "manappuram",
-                "Manappuram Gold Loan",
-                12.0,
-                75.0,
-                vec!["Quick processing", "Multiple schemes"],
-            ),
-            (
-                "iifl",
-                "IIFL Gold Loan",
-                11.0,
-                75.0,
-                vec!["Online account access", "Flexible repayment"],
-            ),
-            (
-                "hdfc",
-                "HDFC Bank Gold Loan",
-                10.5,
-                75.0,
-                vec!["Banking relationship benefits", "Online tracking"],
-            ),
-            (
-                "sbi",
-                "SBI Gold Loan",
-                9.85,
-                75.0,
-                vec!["Low interest for PSU", "Longer tenure options"],
-            ),
-            (
-                "federal",
-                "Federal Bank Gold Loan",
-                10.49,
-                75.0,
-                vec!["Quick processing", "Doorstep service"],
-            ),
-            (
-                "icici",
-                "ICICI Bank Gold Loan",
-                10.0,
-                75.0,
-                vec!["Part payment facility", "Online management"],
-            ),
-        ];
-
-        let kotak_rate = self.get_kotak_rate();
-        let kotak_ltv = self.get_kotak_ltv();
+        // P15 FIX: All values from config, no hardcoded fallbacks
+        let competitors = self.get_competitors();
+        let our_rate = self.get_our_rate();
+        let our_ltv = self.get_our_ltv();
+        let bank_name = self.bank_name();
 
         let selected_competitors: Vec<_> = if competitor == "all" {
             competitors.clone()
         } else {
             competitors
                 .iter()
-                .filter(|(id, _, _, _, _)| *id == competitor)
+                .filter(|(id, _, _, _, _)| id == competitor)
                 .cloned()
                 .collect()
         };
 
-        let kotak_monthly_interest = loan_amount * kotak_rate / 100.0 / 12.0;
-        let kotak_annual_interest = loan_amount * kotak_rate / 100.0;
+        let our_monthly_interest = loan_amount * our_rate / 100.0 / 12.0;
+        let our_annual_interest = loan_amount * our_rate / 100.0;
 
         let mut comparisons: Vec<Value> = vec![];
-        let mut kotak_advantages: Vec<String> = vec![];
+        let mut our_advantages: Vec<String> = vec![];
 
         for (id, name, rate, ltv, features) in selected_competitors {
             let competitor_monthly = loan_amount * rate / 100.0 / 12.0;
             let competitor_annual = loan_amount * rate / 100.0;
-            let monthly_savings = competitor_monthly - kotak_monthly_interest;
-            let annual_savings = competitor_annual - kotak_annual_interest;
+            let monthly_savings = competitor_monthly - our_monthly_interest;
+            let annual_savings = competitor_annual - our_annual_interest;
 
             let comparison = json!({
                 "lender_id": id,
@@ -1626,61 +1663,54 @@ impl Tool for CompetitorComparisonTool {
                 "features": features,
                 "monthly_interest": competitor_monthly,
                 "annual_interest": competitor_annual,
-                "vs_kotak": {
-                    "rate_difference": rate - kotak_rate,
+                "vs_us": {
+                    "rate_difference": rate - our_rate,
                     "monthly_savings": monthly_savings,
                     "annual_savings": annual_savings,
                     "tenure_savings": monthly_savings * tenure_months as f64,
-                    "kotak_is_cheaper": kotak_rate < rate
+                    "we_are_cheaper": our_rate < rate
                 }
             });
             comparisons.push(comparison);
 
-            if kotak_rate < rate {
-                kotak_advantages.push(format!(
+            if our_rate < rate {
+                our_advantages.push(format!(
                     "{}% lower rate than {} (saving ₹{:.0}/month)",
-                    ((rate - kotak_rate) * 100.0).round() / 100.0,
+                    ((rate - our_rate) * 100.0).round() / 100.0,
                     name,
                     monthly_savings
                 ));
             }
         }
 
-        let kotak_features = vec![
-            "Competitive interest rate from 10.49% p.a.",
-            "Up to 75% LTV (Loan-to-Value)",
-            "Same day disbursement",
-            "No hidden charges",
-            "Flexible repayment options",
-            "Part payment facility",
-            "Online loan management",
-            "Wide branch network",
-            "Transparent valuation process",
-        ];
+        // P15 FIX: Get our features from config
+        let our_features = self.get_our_features();
 
         let result = json!({
             "comparison_for": {
                 "loan_amount": loan_amount,
                 "tenure_months": tenure_months
             },
-            "kotak_mahindra_bank": {
-                "interest_rate": kotak_rate,
-                "ltv_percent": kotak_ltv,
-                "monthly_interest": kotak_monthly_interest,
-                "annual_interest": kotak_annual_interest,
-                "features": kotak_features
+            "our_bank": {
+                "name": bank_name,
+                "interest_rate": our_rate,
+                "ltv_percent": our_ltv,
+                "monthly_interest": our_monthly_interest,
+                "annual_interest": our_annual_interest,
+                "features": our_features
             },
             "competitors": comparisons,
-            "kotak_advantages": kotak_advantages,
+            "our_advantages": our_advantages,
             "summary": format!(
-                "For a loan of ₹{:.0}, Kotak offers {}% p.a. with monthly interest of ₹{:.0}. {}",
+                "For a loan of ₹{:.0}, {} offers {}% p.a. with monthly interest of ₹{:.0}. {}",
                 loan_amount,
-                kotak_rate,
-                kotak_monthly_interest,
-                if kotak_advantages.is_empty() {
-                    "Kotak rates are competitive with the market.".to_string()
+                bank_name,
+                our_rate,
+                our_monthly_interest,
+                if our_advantages.is_empty() {
+                    format!("{} rates are competitive with the market.", bank_name)
                 } else {
-                    format!("You can save compared to: {}", kotak_advantages.join(", "))
+                    format!("You can save compared to: {}", our_advantages.join(", "))
                 }
             )
         });
@@ -1689,11 +1719,7 @@ impl Tool for CompetitorComparisonTool {
     }
 }
 
-impl Default for CompetitorComparisonTool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// P15 FIX: Removed Default impl - ToolsDomainView is required
 
 /// Filter branches and return as JSON values for tool output
 fn filter_branches_json(

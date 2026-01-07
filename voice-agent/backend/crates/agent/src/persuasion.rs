@@ -1,16 +1,79 @@
 //! P2 FIX: Persuasion Engine for Objection Handling
 //!
-//! Implements objection handling patterns for gold loan sales:
+//! Implements objection handling patterns for sales:
 //! - Acknowledge: Validate customer concerns
 //! - Reframe: Present alternative perspective
 //! - Evidence: Provide supporting facts/data
 //! - Value Proposition: Articulate key benefits
 //!
 //! Supports both English and Hindi responses.
+//!
+//! P13 FIX: Now supports config-driven objection handling via AgentDomainView.
+//! Use `from_view()` constructor to load responses from objections.yaml.
+//!
+//! ## Phase 2 (Domain-Agnosticism): PersuasionStrategy Trait
+//!
+//! The `PersuasionStrategy` trait abstracts persuasion/objection handling, allowing
+//! domain-agnostic agents to work with any persuasion implementation. This enables:
+//! - Domain-specific objection handlers
+//! - Testing with mock persuasion engines
+//! - Alternative persuasion strategies
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
+use voice_agent_config::domain::AgentDomainView;
 use voice_agent_core::Language;
+
+// =============================================================================
+// Phase 2: PersuasionStrategy Trait (Domain-Agnostic Abstraction)
+// =============================================================================
+
+/// Trait for persuasion/objection handling abstraction
+///
+/// This trait allows domain-agnostic agents to work with any persuasion
+/// implementation. Implementations must be thread-safe (Send + Sync).
+///
+/// # Example
+/// ```ignore
+/// // Agent uses trait bound instead of concrete PersuasionEngine
+/// pub struct DomainAgent<P: PersuasionStrategy> {
+///     persuasion: Arc<P>,
+///     // ...
+/// }
+/// ```
+pub trait PersuasionStrategy: Send + Sync {
+    /// Handle an objection and return appropriate response
+    fn handle_objection(&self, text: &str, language: Language) -> Option<ObjectionResponse>;
+
+    /// Get response for a specific objection type
+    fn get_response(
+        &self,
+        objection_type: ObjectionType,
+        language: Language,
+    ) -> Option<ObjectionResponse>;
+
+    /// Get value proposition for customer segment
+    fn get_value_proposition(&self, segment: &str) -> Option<ValueProposition>;
+
+    /// Get competitor comparison data
+    fn get_competitor_comparison(&self, competitor: &str) -> Option<CompetitorComparison>;
+
+    /// Calculate savings for switching from a competitor
+    fn calculate_switch_savings(
+        &self,
+        competitor: &str,
+        loan_amount: f64,
+    ) -> Option<SwitchSavings>;
+
+    /// Generate a full persuasion script for a scenario
+    fn generate_script(
+        &self,
+        objection_type: ObjectionType,
+        language: Language,
+        customer_segment: Option<&str>,
+    ) -> PersuasionScript;
+}
 
 /// Types of objections commonly encountered in gold loan sales
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -191,6 +254,8 @@ pub struct CompetitorComparison {
 
 impl PersuasionEngine {
     /// Create a new persuasion engine with default handlers
+    ///
+    /// Note: Prefer `from_view()` for config-driven responses.
     pub fn new() -> Self {
         let mut engine = Self {
             handlers: HashMap::new(),
@@ -205,7 +270,137 @@ impl PersuasionEngine {
         engine
     }
 
+    /// P13 FIX: Create persuasion engine from config view
+    ///
+    /// Loads objection handlers and competitor data from YAML configuration.
+    /// This is the preferred constructor for production use.
+    pub fn from_view(view: &Arc<AgentDomainView>) -> Self {
+        let mut engine = Self {
+            handlers: HashMap::new(),
+            value_propositions: HashMap::new(),
+            competition_data: HashMap::new(),
+        };
+
+        // Load objection handlers from config
+        engine.load_handlers_from_config(view);
+
+        // Load competitor data from config
+        engine.load_competition_from_config(view);
+
+        // Value propositions (keep default for now, could be loaded from segments config)
+        engine.register_value_propositions();
+
+        engine
+    }
+
+    /// P13 FIX: Load objection handlers from config
+    fn load_handlers_from_config(&mut self, view: &Arc<AgentDomainView>) {
+        let objections_config = view.objections_config();
+
+        // Map config objection types to enum
+        let type_mapping: HashMap<&str, ObjectionType> = [
+            ("safety", ObjectionType::Safety),
+            ("interest_rate", ObjectionType::InterestRate),
+            ("gold_security", ObjectionType::GoldSecurity),
+            ("process_complexity", ObjectionType::ProcessComplexity),
+            ("need_time", ObjectionType::NeedTime),
+            ("current_lender_satisfaction", ObjectionType::CurrentLenderSatisfaction),
+            ("hidden_charges", ObjectionType::HiddenCharges),
+            ("documentation", ObjectionType::Documentation),
+            ("trust_issues", ObjectionType::TrustIssues),
+        ].into_iter().collect();
+
+        // Load English and Hindi responses for each objection type
+        for (config_type, objection_type) in &type_mapping {
+            // English
+            if let Some(config_response) = objections_config.get_response(config_type, "en") {
+                self.handlers.insert(
+                    (*objection_type, Language::English),
+                    ObjectionResponse {
+                        acknowledge: config_response.acknowledge.clone(),
+                        reframe: config_response.reframe.clone(),
+                        evidence: config_response.evidence.clone(),
+                        call_to_action: config_response.call_to_action.clone(),
+                    },
+                );
+            }
+
+            // Hindi
+            if let Some(config_response) = objections_config.get_response(config_type, "hi") {
+                self.handlers.insert(
+                    (*objection_type, Language::Hindi),
+                    ObjectionResponse {
+                        acknowledge: config_response.acknowledge.clone(),
+                        reframe: config_response.reframe.clone(),
+                        evidence: config_response.evidence.clone(),
+                        call_to_action: config_response.call_to_action.clone(),
+                    },
+                );
+            }
+        }
+
+        // Load default/other responses
+        if let Some(default_response) = objections_config.get_default_response("en") {
+            self.handlers.insert(
+                (ObjectionType::Other, Language::English),
+                ObjectionResponse {
+                    acknowledge: default_response.acknowledge.clone(),
+                    reframe: default_response.reframe.clone(),
+                    evidence: default_response.evidence.clone(),
+                    call_to_action: default_response.call_to_action.clone(),
+                },
+            );
+        }
+        if let Some(default_response) = objections_config.get_default_response("hi") {
+            self.handlers.insert(
+                (ObjectionType::Other, Language::Hindi),
+                ObjectionResponse {
+                    acknowledge: default_response.acknowledge.clone(),
+                    reframe: default_response.reframe.clone(),
+                    evidence: default_response.evidence.clone(),
+                    call_to_action: default_response.call_to_action.clone(),
+                },
+            );
+        }
+    }
+
+    /// P13 FIX: Load competitor comparison data from config
+    fn load_competition_from_config(&mut self, view: &Arc<AgentDomainView>) {
+        let our_best_rate = view.our_rate_for_amount(500_000.0); // Premium rate
+
+        // Load from config competitors
+        let competitors = ["muthoot", "manappuram", "iifl"];
+        for competitor_id in competitors {
+            if let Some(their_rate) = view.get_competitor_rate(competitor_id) {
+                let monthly_savings = (their_rate - our_best_rate) / 100.0 / 12.0 * 100_000.0;
+
+                self.competition_data.insert(
+                    competitor_id.to_string(),
+                    CompetitorComparison {
+                        name: match competitor_id {
+                            "muthoot" => "Muthoot Finance".to_string(),
+                            "manappuram" => "Manappuram Finance".to_string(),
+                            "iifl" => "IIFL Finance".to_string(),
+                            _ => competitor_id.to_string(),
+                        },
+                        their_rate,
+                        our_rate: our_best_rate,
+                        monthly_savings_per_lakh: monthly_savings,
+                        our_advantages: vec![
+                            "Bank-level security".to_string(),
+                            "RBI-regulated".to_string(),
+                            "Doorstep service".to_string(),
+                            "Zero foreclosure charges".to_string(),
+                        ],
+                    },
+                );
+            }
+        }
+    }
+
     /// Register default objection handlers for English and Hindi
+    ///
+    /// Note: This is a fallback. Prefer config-driven loading via `from_view()`.
     fn register_default_handlers(&mut self) {
         // Safety objection - English
         self.handlers.insert(
@@ -617,6 +812,49 @@ impl PersuasionEngine {
 impl Default for PersuasionEngine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// =============================================================================
+// Phase 2: PersuasionStrategy Implementation for PersuasionEngine
+// =============================================================================
+
+impl PersuasionStrategy for PersuasionEngine {
+    fn handle_objection(&self, text: &str, language: Language) -> Option<ObjectionResponse> {
+        PersuasionEngine::handle_objection(self, text, language)
+    }
+
+    fn get_response(
+        &self,
+        objection_type: ObjectionType,
+        language: Language,
+    ) -> Option<ObjectionResponse> {
+        PersuasionEngine::get_response(self, objection_type, language)
+    }
+
+    fn get_value_proposition(&self, segment: &str) -> Option<ValueProposition> {
+        PersuasionEngine::get_value_proposition(self, segment)
+    }
+
+    fn get_competitor_comparison(&self, competitor: &str) -> Option<CompetitorComparison> {
+        PersuasionEngine::get_competitor_comparison(self, competitor)
+    }
+
+    fn calculate_switch_savings(
+        &self,
+        competitor: &str,
+        loan_amount: f64,
+    ) -> Option<SwitchSavings> {
+        PersuasionEngine::calculate_switch_savings(self, competitor, loan_amount)
+    }
+
+    fn generate_script(
+        &self,
+        objection_type: ObjectionType,
+        language: Language,
+        customer_segment: Option<&str>,
+    ) -> PersuasionScript {
+        PersuasionEngine::generate_script(self, objection_type, language, customer_segment)
     }
 }
 

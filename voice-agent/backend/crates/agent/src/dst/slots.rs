@@ -2,202 +2,63 @@
 //!
 //! Domain-specific slot schema based on LDST and ACL 2024 research.
 //! Implements structured dialogue state for gold loan conversations.
+//!
+//! NOTE: Purity values are now config-driven. Use AgentDomainView.purity_factor()
+//! to get the purity factor for a given purity ID.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-/// Gold purity levels (in karats)
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum GoldPurity {
-    /// 24 karat (99.9% pure)
-    K24,
-    /// 22 karat (91.6% pure)
-    K22,
-    /// 18 karat (75% pure)
-    K18,
-    /// 14 karat (58.3% pure)
-    K14,
-    /// Unknown purity
-    Unknown,
+/// Purity ID - string-based identifier for gold purity (config-driven)
+/// Common IDs: "24k", "22k", "18k", "14k"
+/// Purity factors are defined in config/domains/{domain}/slots.yaml
+pub type PurityId = String;
+
+/// Common purity IDs (for reference - actual purity factors come from config)
+pub mod purity_ids {
+    pub const K24: &str = "24k";
+    pub const K22: &str = "22k";
+    pub const K18: &str = "18k";
+    pub const K14: &str = "14k";
+    pub const UNKNOWN: &str = "unknown";
 }
 
-impl GoldPurity {
-    /// Get purity percentage
-    pub fn percentage(&self) -> f32 {
-        match self {
-            GoldPurity::K24 => 99.9,
-            GoldPurity::K22 => 91.6,
-            GoldPurity::K18 => 75.0,
-            GoldPurity::K14 => 58.3,
-            GoldPurity::Unknown => 0.0,
-        }
-    }
-
-    /// Parse from string
-    pub fn from_str(s: &str) -> Self {
-        let lower = s.to_lowercase();
-        if lower.contains("24") {
-            GoldPurity::K24
-        } else if lower.contains("22") {
-            GoldPurity::K22
-        } else if lower.contains("18") {
-            GoldPurity::K18
-        } else if lower.contains("14") {
-            GoldPurity::K14
-        } else {
-            GoldPurity::Unknown
-        }
+/// Parse purity ID from free text
+pub fn parse_purity_id(text: &str) -> &'static str {
+    let lower = text.to_lowercase();
+    if lower.contains("24") {
+        purity_ids::K24
+    } else if lower.contains("22") {
+        purity_ids::K22
+    } else if lower.contains("18") {
+        purity_ids::K18
+    } else if lower.contains("14") {
+        purity_ids::K14
+    } else {
+        purity_ids::UNKNOWN
     }
 }
 
-impl std::fmt::Display for GoldPurity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GoldPurity::K24 => write!(f, "24 karat"),
-            GoldPurity::K22 => write!(f, "22 karat"),
-            GoldPurity::K18 => write!(f, "18 karat"),
-            GoldPurity::K14 => write!(f, "14 karat"),
-            GoldPurity::Unknown => write!(f, "unknown purity"),
-        }
+/// Format purity ID for display
+pub fn format_purity_display(purity_id: &str) -> &'static str {
+    match purity_id {
+        "24k" => "24 karat",
+        "22k" => "22 karat",
+        "18k" => "18 karat",
+        "14k" => "14 karat",
+        _ => "unknown purity",
     }
 }
 
-/// Conversation Goal - tracks the primary journey the customer is on
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum ConversationGoal {
-    /// Just exploring/gathering information
-    #[default]
-    Exploration,
-    /// Balance transfer from another lender (Muthoot, Manappuram, etc.)
-    BalanceTransfer,
-    /// New gold loan application
-    NewLoan,
-    /// Checking eligibility
-    EligibilityCheck,
-    /// Looking for branch/appointment
-    BranchVisit,
-    /// Wants callback/lead capture
-    LeadCapture,
-}
+/// Goal ID - string-based goal identifier (config-driven)
+///
+/// Goals are defined in config/domains/{domain}/goals.yaml
+/// Common goal IDs: "exploration", "balance_transfer", "new_loan",
+/// "eligibility_check", "branch_visit", "lead_capture"
+pub type GoalId = String;
 
-impl ConversationGoal {
-    /// Get the required slots for this goal
-    pub fn required_slots(&self) -> &'static [&'static str] {
-        match self {
-            ConversationGoal::Exploration => &[],
-            ConversationGoal::BalanceTransfer => &["current_lender", "loan_amount"],
-            ConversationGoal::NewLoan => &["gold_weight", "loan_amount"],
-            ConversationGoal::EligibilityCheck => &["gold_weight"],
-            ConversationGoal::BranchVisit => &["location"],
-            ConversationGoal::LeadCapture => &["customer_name", "phone_number"],
-        }
-    }
-
-    /// Get optional slots that enhance the goal
-    pub fn optional_slots(&self) -> &'static [&'static str] {
-        match self {
-            ConversationGoal::Exploration => &[],
-            ConversationGoal::BalanceTransfer => &["current_interest_rate", "gold_weight", "gold_purity"],
-            ConversationGoal::NewLoan => &["gold_purity", "loan_purpose", "loan_tenure"],
-            ConversationGoal::EligibilityCheck => &["gold_purity", "loan_amount"],
-            ConversationGoal::BranchVisit => &["preferred_date", "preferred_time", "customer_name", "phone_number"],
-            ConversationGoal::LeadCapture => &["location", "loan_amount"],
-        }
-    }
-
-    /// Get the next best action based on filled slots
-    pub fn next_action(&self, filled_slots: &[&str]) -> NextBestAction {
-        match self {
-            ConversationGoal::BalanceTransfer => {
-                let has_lender = filled_slots.contains(&"current_lender");
-                let has_amount = filled_slots.contains(&"loan_amount");
-                let has_rate = filled_slots.contains(&"current_interest_rate");
-                let has_location = filled_slots.contains(&"location");
-                let has_contact = filled_slots.contains(&"phone_number") || filled_slots.contains(&"customer_name");
-
-                if has_lender && has_amount && has_rate {
-                    // Ready to calculate savings
-                    NextBestAction::CallTool("calculate_savings".to_string())
-                } else if has_lender && has_amount && !has_rate {
-                    NextBestAction::AskFor("current_interest_rate".to_string())
-                } else if has_lender && !has_amount {
-                    NextBestAction::AskFor("loan_amount".to_string())
-                } else if has_lender && has_amount && has_location && !has_contact {
-                    // Have location, offer appointment
-                    NextBestAction::OfferAppointment
-                } else if has_lender && has_amount && !has_location {
-                    NextBestAction::AskFor("location".to_string())
-                } else {
-                    NextBestAction::ExplainProcess
-                }
-            }
-            ConversationGoal::NewLoan => {
-                let has_weight = filled_slots.contains(&"gold_weight");
-                let has_amount = filled_slots.contains(&"loan_amount");
-
-                if has_weight {
-                    NextBestAction::CallTool("check_eligibility".to_string())
-                } else if has_amount && !has_weight {
-                    NextBestAction::AskFor("gold_weight".to_string())
-                } else {
-                    NextBestAction::AskFor("loan_amount".to_string())
-                }
-            }
-            ConversationGoal::EligibilityCheck => {
-                if filled_slots.contains(&"gold_weight") {
-                    NextBestAction::CallTool("check_eligibility".to_string())
-                } else {
-                    NextBestAction::AskFor("gold_weight".to_string())
-                }
-            }
-            ConversationGoal::BranchVisit => {
-                if filled_slots.contains(&"location") {
-                    NextBestAction::CallTool("find_branches".to_string())
-                } else {
-                    NextBestAction::AskFor("location".to_string())
-                }
-            }
-            ConversationGoal::LeadCapture => {
-                let has_name = filled_slots.contains(&"customer_name");
-                let has_phone = filled_slots.contains(&"phone_number");
-
-                if has_name && has_phone {
-                    NextBestAction::CallTool("capture_lead".to_string())
-                } else if has_name && !has_phone {
-                    NextBestAction::AskFor("phone_number".to_string())
-                } else {
-                    NextBestAction::AskFor("customer_name".to_string())
-                }
-            }
-            ConversationGoal::Exploration => NextBestAction::DiscoverIntent,
-        }
-    }
-
-    /// Detect goal from intent string
-    pub fn from_intent(intent: &str) -> Self {
-        match intent {
-            "balance_transfer" | "switch_lender" | "loan_transfer" => ConversationGoal::BalanceTransfer,
-            "eligibility_inquiry" | "eligibility_check" => ConversationGoal::EligibilityCheck,
-            "new_loan" | "loan_inquiry" | "gold_loan" => ConversationGoal::NewLoan,
-            "branch_inquiry" | "find_branch" | "schedule_visit" | "appointment_request" => ConversationGoal::BranchVisit,
-            "callback_request" | "capture_lead" | "interested" | "sms_request" => ConversationGoal::LeadCapture,
-            _ => ConversationGoal::Exploration,
-        }
-    }
-}
-
-impl std::fmt::Display for ConversationGoal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConversationGoal::Exploration => write!(f, "exploration"),
-            ConversationGoal::BalanceTransfer => write!(f, "balance_transfer"),
-            ConversationGoal::NewLoan => write!(f, "new_loan"),
-            ConversationGoal::EligibilityCheck => write!(f, "eligibility_check"),
-            ConversationGoal::BranchVisit => write!(f, "branch_visit"),
-            ConversationGoal::LeadCapture => write!(f, "lead_capture"),
-        }
-    }
-}
+/// Default goal ID
+pub const DEFAULT_GOAL: &str = "exploration";
 
 /// Next best action for the agent
 #[derive(Debug, Clone, PartialEq)]
@@ -327,7 +188,7 @@ impl SlotValue {
 ///
 /// Tracks all slot values relevant to a gold loan conversation.
 /// Implements domain-specific slot schema based on gold loan business logic.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoldLoanDialogueState {
     // ====== Customer Information ======
     /// Customer name
@@ -382,8 +243,8 @@ pub struct GoldLoanDialogueState {
     secondary_intents: Vec<String>,
 
     // ====== Goal Tracking ======
-    /// Current conversation goal
-    conversation_goal: ConversationGoal,
+    /// Current conversation goal ID (config-driven)
+    conversation_goal: GoalId,
     /// Whether goal has been explicitly set (vs inferred)
     goal_confirmed: bool,
     /// Turn at which goal was set
@@ -396,6 +257,40 @@ pub struct GoldLoanDialogueState {
     confirmed_slots: HashSet<String>,
     /// Custom/dynamic slots
     custom_slots: HashMap<String, SlotValue>,
+}
+
+impl Default for GoldLoanDialogueState {
+    fn default() -> Self {
+        Self {
+            customer_name: None,
+            phone_number: None,
+            location: None,
+            pincode: None,
+            gold_weight_grams: None,
+            gold_purity: None,
+            gold_item_type: None,
+            loan_amount: None,
+            loan_purpose: None,
+            loan_tenure: None,
+            urgency: None,
+            current_lender: None,
+            current_outstanding: None,
+            current_interest_rate: None,
+            preferred_date: None,
+            preferred_time: None,
+            preferred_branch: None,
+            primary_intent: None,
+            intent_confidence: 0.0,
+            secondary_intents: Vec::new(),
+            // Phase 2 fix: Set default goal to exploration
+            conversation_goal: DEFAULT_GOAL.to_string(),
+            goal_confirmed: false,
+            goal_set_turn: 0,
+            pending_slots: HashSet::new(),
+            confirmed_slots: HashSet::new(),
+            custom_slots: HashMap::new(),
+        }
+    }
 }
 
 impl GoldLoanDialogueState {
@@ -435,11 +330,17 @@ impl GoldLoanDialogueState {
             .and_then(|v| v.value.parse().ok())
     }
 
-    /// Get gold purity
-    pub fn gold_purity(&self) -> Option<GoldPurity> {
+    /// Get gold purity ID (config-driven)
+    /// Use AgentDomainView.purity_factor() to get the actual factor
+    pub fn gold_purity(&self) -> Option<&'static str> {
         self.gold_purity
             .as_ref()
-            .map(|v| GoldPurity::from_str(&v.value))
+            .map(|v| parse_purity_id(&v.value))
+    }
+
+    /// Get gold purity as raw slot value
+    pub fn gold_purity_raw(&self) -> Option<&str> {
+        self.gold_purity.as_ref().map(|v| v.value.as_str())
     }
 
     /// Get gold item type
@@ -557,9 +458,9 @@ impl GoldLoanDialogueState {
 
     // ====== Goal Tracking Methods ======
 
-    /// Get the current conversation goal
-    pub fn conversation_goal(&self) -> ConversationGoal {
-        self.conversation_goal
+    /// Get the current conversation goal ID
+    pub fn goal_id(&self) -> &str {
+        &self.conversation_goal
     }
 
     /// Check if goal is confirmed (explicit) vs inferred
@@ -567,175 +468,49 @@ impl GoldLoanDialogueState {
         self.goal_confirmed
     }
 
-    /// Update the conversation goal based on detected intent
-    pub fn update_goal_from_intent(&mut self, intent: &str, turn: usize) {
-        let new_goal = ConversationGoal::from_intent(intent);
-
-        // Only upgrade goal, don't downgrade (e.g., don't go from BalanceTransfer to Exploration)
-        let should_update = match (&self.conversation_goal, &new_goal) {
-            (ConversationGoal::Exploration, _) => true, // Always upgrade from exploration
-            (_, ConversationGoal::Exploration) => false, // Never downgrade to exploration
-            (ConversationGoal::BalanceTransfer, ConversationGoal::LeadCapture) => true, // BT can lead to lead capture
-            (ConversationGoal::BalanceTransfer, ConversationGoal::BranchVisit) => true, // BT can lead to branch visit
-            (ConversationGoal::NewLoan, ConversationGoal::LeadCapture) => true,
-            (ConversationGoal::NewLoan, ConversationGoal::BranchVisit) => true,
-            (ConversationGoal::EligibilityCheck, ConversationGoal::NewLoan) => true, // Eligibility often leads to new loan
-            (ConversationGoal::EligibilityCheck, ConversationGoal::LeadCapture) => true,
-            _ => false, // Don't change for other transitions
-        };
-
-        if should_update && new_goal != ConversationGoal::Exploration {
-            self.conversation_goal = new_goal;
+    /// Set the conversation goal by ID
+    ///
+    /// Use the goal schema to map intents to goals:
+    /// ```ignore
+    /// if let Some(goal_id) = schema.goal_for_intent(intent) {
+    ///     state.set_goal(goal_id, turn);
+    /// }
+    /// ```
+    pub fn set_goal(&mut self, goal_id: &str, turn: usize) {
+        // Only update if it's a meaningful change (not downgrading to exploration)
+        if goal_id != DEFAULT_GOAL || self.conversation_goal == DEFAULT_GOAL {
+            self.conversation_goal = goal_id.to_string();
             self.goal_set_turn = turn;
         }
     }
 
-    /// Set the conversation goal explicitly (e.g., user confirmed it)
-    pub fn set_goal(&mut self, goal: ConversationGoal, turn: usize) {
-        self.conversation_goal = goal;
+    /// Set the conversation goal explicitly (confirmed by user)
+    pub fn confirm_goal(&mut self, goal_id: &str, turn: usize) {
+        self.conversation_goal = goal_id.to_string();
         self.goal_confirmed = true;
         self.goal_set_turn = turn;
     }
 
-    /// Get the next best action based on current goal and filled slots
-    pub fn get_next_action(&self) -> NextBestAction {
-        let filled = self.filled_slots();
-        self.conversation_goal.next_action(&filled)
-    }
-
-    /// Get missing required slots for current goal
-    pub fn missing_required_slots(&self) -> Vec<&'static str> {
-        let filled = self.filled_slots();
-        self.conversation_goal
-            .required_slots()
-            .iter()
-            .filter(|s| !filled.contains(*s))
-            .copied()
-            .collect()
-    }
-
-    /// Get missing optional slots for current goal
-    pub fn missing_optional_slots(&self) -> Vec<&'static str> {
-        let filled = self.filled_slots();
-        self.conversation_goal
-            .optional_slots()
-            .iter()
-            .filter(|s| !filled.contains(*s))
-            .copied()
-            .collect()
-    }
-
-    /// Calculate goal completion percentage
-    pub fn goal_completion(&self) -> f32 {
-        let required = self.conversation_goal.required_slots();
-        if required.is_empty() {
-            return 1.0;
-        }
-
-        let filled = self.filled_slots();
-        let filled_required = required.iter().filter(|s| filled.contains(*s)).count();
-        filled_required as f32 / required.len() as f32
-    }
-
-    /// Check if we should proactively trigger a tool
-    pub fn should_trigger_tool(&self) -> Option<String> {
-        let completion = self.goal_completion();
-
-        match self.conversation_goal {
-            ConversationGoal::BalanceTransfer => {
-                // If we have lender + amount + rate, trigger calculate_savings
-                if self.current_lender.is_some()
-                    && self.loan_amount.is_some()
-                    && self.current_interest_rate.is_some()
-                {
-                    return Some("calculate_savings".to_string());
-                }
-            }
-            ConversationGoal::EligibilityCheck => {
-                if self.gold_weight_grams.is_some() {
-                    return Some("check_eligibility".to_string());
-                }
-            }
-            ConversationGoal::BranchVisit => {
-                if self.location.is_some() {
-                    return Some("find_branches".to_string());
-                }
-            }
-            ConversationGoal::LeadCapture => {
-                if self.customer_name.is_some() && self.phone_number.is_some() {
-                    return Some("capture_lead".to_string());
-                }
-            }
-            ConversationGoal::NewLoan => {
-                if self.gold_weight_grams.is_some() && completion >= 0.5 {
-                    return Some("check_eligibility".to_string());
-                }
-            }
-            ConversationGoal::Exploration => {}
-        }
-
-        None
+    /// Get the turn at which the goal was set
+    pub fn goal_set_turn(&self) -> usize {
+        self.goal_set_turn
     }
 
     /// Check if we should auto-capture lead (when we have contact info during any goal)
     /// Returns true if lead capture should be triggered as a secondary action
     pub fn should_auto_capture_lead(&self) -> bool {
         // Don't duplicate if already in lead capture mode
-        if self.conversation_goal == ConversationGoal::LeadCapture {
+        if self.conversation_goal == "lead_capture" {
             return false;
         }
 
         // Capture lead if we have both name and phone collected
-        // and we're progressing well on another goal (showing engagement)
-        let has_contact = self.customer_name.is_some() && self.phone_number.is_some();
-        let has_partial_contact = self.customer_name.is_some() || self.phone_number.is_some();
-
-        // Full contact info = definitely capture
-        if has_contact {
-            return true;
-        }
-
-        // Partial contact + high goal completion = capture
-        let completion = self.goal_completion();
-        if has_partial_contact && completion >= 0.75 {
-            return true;
-        }
-
-        false
+        self.customer_name.is_some() && self.phone_number.is_some()
     }
 
-    /// Generate goal-aware context for LLM prompt
-    pub fn goal_context(&self) -> String {
-        let mut parts = Vec::new();
-
-        // Current goal
-        parts.push(format!("## Current Goal: {}", self.conversation_goal));
-
-        // Goal completion
-        let completion = self.goal_completion();
-        if completion < 1.0 {
-            let missing = self.missing_required_slots();
-            if !missing.is_empty() {
-                parts.push(format!("Missing required info: {}", missing.join(", ")));
-            }
-        } else {
-            parts.push("All required information collected.".to_string());
-        }
-
-        // Next action
-        let next_action = self.get_next_action();
-        parts.push(format!("## Next Action: {}", next_action.to_instruction()));
-
-        // For balance transfer, add key process info
-        if self.conversation_goal == ConversationGoal::BalanceTransfer {
-            parts.push("\n## Balance Transfer Key Points:".to_string());
-            parts.push("- Kotak pays off existing lender directly (no cash needed from customer)".to_string());
-            parts.push("- Customer keeps same gold, just transfers to Kotak vault".to_string());
-            parts.push("- Lower interest rate: 10.5% vs competitor's higher rates".to_string());
-            parts.push("- Process: Verify gold → Pay off old loan → New Kotak loan same day".to_string());
-        }
-
-        parts.join("\n")
+    /// Check if we have complete contact info
+    pub fn has_complete_contact(&self) -> bool {
+        self.customer_name.is_some() && self.phone_number.is_some()
     }
 
     // ====== State Management ======
@@ -1071,8 +846,8 @@ impl GoldLoanDialogueState {
         output.push_str(&self.to_context_string());
         output.push_str("\n\n");
 
-        // Goal context
-        output.push_str(&self.goal_context());
+        // Goal info
+        output.push_str(&format!("# Current Goal: {}\n", self.conversation_goal));
 
         output
     }
@@ -1104,6 +879,65 @@ impl GoldLoanDialogueState {
         }
 
         slots
+    }
+
+    /// Get the next best action for the agent based on current state
+    ///
+    /// This method analyzes the current goal and filled slots to recommend
+    /// what the agent should do next.
+    pub fn next_best_action(&self) -> NextBestAction {
+        // Based on current goal, determine what to do next
+        match self.conversation_goal.as_str() {
+            "exploration" | "" => {
+                // Still exploring - discover intent first
+                NextBestAction::DiscoverIntent
+            }
+            "balance_transfer" => {
+                // Need current lender info to calculate savings
+                if self.current_lender.is_none() {
+                    return NextBestAction::AskFor("current_lender".to_string());
+                }
+                if self.current_outstanding.is_none() {
+                    return NextBestAction::AskFor("current_outstanding".to_string());
+                }
+                if self.current_interest_rate.is_none() {
+                    return NextBestAction::AskFor("current_interest_rate".to_string());
+                }
+                // Have all info - calculate savings
+                NextBestAction::CallTool("calculate_savings".to_string())
+            }
+            "eligibility_check" | "new_loan" => {
+                // Need gold details
+                if self.gold_weight_grams.is_none() {
+                    return NextBestAction::AskFor("gold_weight".to_string());
+                }
+                // Can check eligibility
+                NextBestAction::CallTool("check_eligibility".to_string())
+            }
+            "branch_visit" => {
+                // Need location
+                if self.location.is_none() {
+                    return NextBestAction::AskFor("location".to_string());
+                }
+                // Offer appointment
+                NextBestAction::OfferAppointment
+            }
+            "lead_capture" => {
+                // Need contact info
+                if self.customer_name.is_none() {
+                    return NextBestAction::AskFor("customer_name".to_string());
+                }
+                if self.phone_number.is_none() {
+                    return NextBestAction::AskFor("phone_number".to_string());
+                }
+                // Have contact info - capture lead
+                NextBestAction::CaptureLead
+            }
+            _ => {
+                // Unknown goal - discover intent
+                NextBestAction::DiscoverIntent
+            }
+        }
     }
 
     /// Calculate completion percentage for a given intent
@@ -1154,22 +988,103 @@ impl GoldLoanDialogueState {
     }
 }
 
+// =============================================================================
+// Phase 2: DialogueState Trait Implementation
+// =============================================================================
+
+impl super::DialogueState for GoldLoanDialogueState {
+    fn primary_intent(&self) -> Option<&str> {
+        self.primary_intent.as_deref()
+    }
+
+    fn get_slot_value(&self, slot_name: &str) -> Option<String> {
+        GoldLoanDialogueState::get_slot_value(self, slot_name)
+    }
+
+    fn set_slot_value(&mut self, slot_name: &str, value: &str, confidence: f32) {
+        GoldLoanDialogueState::set_slot_value(self, slot_name, value, confidence)
+    }
+
+    fn clear_slot(&mut self, slot_name: &str) {
+        GoldLoanDialogueState::clear_slot(self, slot_name)
+    }
+
+    fn filled_slots(&self) -> Vec<&str> {
+        GoldLoanDialogueState::filled_slots(self)
+    }
+
+    fn pending_slots(&self) -> &HashSet<String> {
+        &self.pending_slots
+    }
+
+    fn confirmed_slots(&self) -> &HashSet<String> {
+        &self.confirmed_slots
+    }
+
+    fn mark_pending(&mut self, slot_name: &str) {
+        GoldLoanDialogueState::mark_pending(self, slot_name)
+    }
+
+    fn mark_confirmed(&mut self, slot_name: &str) {
+        GoldLoanDialogueState::mark_confirmed(self, slot_name)
+    }
+
+    fn goal_id(&self) -> &str {
+        &self.conversation_goal
+    }
+
+    fn set_goal(&mut self, goal_id: &str, turn: usize) {
+        GoldLoanDialogueState::set_goal(self, goal_id, turn)
+    }
+
+    fn confirm_goal(&mut self, goal_id: &str, turn: usize) {
+        GoldLoanDialogueState::confirm_goal(self, goal_id, turn)
+    }
+
+    fn should_auto_capture_lead(&self) -> bool {
+        GoldLoanDialogueState::should_auto_capture_lead(self)
+    }
+
+    fn to_context_string(&self) -> String {
+        GoldLoanDialogueState::to_context_string(self)
+    }
+
+    fn to_full_context_string(&self) -> String {
+        GoldLoanDialogueState::to_full_context_string(self)
+    }
+
+    fn update_intent(&mut self, intent: &str, confidence: f32) {
+        GoldLoanDialogueState::update_intent(self, intent, confidence)
+    }
+
+    fn get_slot_with_confidence(&self, slot_name: &str) -> Option<&SlotValue> {
+        GoldLoanDialogueState::get_slot_with_confidence(self, slot_name)
+    }
+
+    fn next_best_action(&self) -> NextBestAction {
+        GoldLoanDialogueState::next_best_action(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_gold_purity_parsing() {
-        assert_eq!(GoldPurity::from_str("24k gold"), GoldPurity::K24);
-        assert_eq!(GoldPurity::from_str("22 karat"), GoldPurity::K22);
-        assert_eq!(GoldPurity::from_str("18kt"), GoldPurity::K18);
-        assert_eq!(GoldPurity::from_str("pure gold"), GoldPurity::Unknown);
+        // Now uses string-based purity IDs (config-driven)
+        assert_eq!(parse_purity_id("24k gold"), purity_ids::K24);
+        assert_eq!(parse_purity_id("22 karat"), purity_ids::K22);
+        assert_eq!(parse_purity_id("18kt"), purity_ids::K18);
+        assert_eq!(parse_purity_id("pure gold"), purity_ids::UNKNOWN);
     }
 
     #[test]
-    fn test_gold_purity_percentage() {
-        assert!((GoldPurity::K24.percentage() - 99.9).abs() < 0.1);
-        assert!((GoldPurity::K22.percentage() - 91.6).abs() < 0.1);
+    fn test_gold_purity_display() {
+        // Display formatting
+        assert_eq!(format_purity_display(purity_ids::K24), "24 karat");
+        assert_eq!(format_purity_display(purity_ids::K22), "22 karat");
+        // NOTE: Actual purity factors should come from config via AgentDomainView.purity_factor()
     }
 
     #[test]
@@ -1280,133 +1195,38 @@ mod tests {
     // ====== Goal Tracking Tests ======
 
     #[test]
-    fn test_conversation_goal_from_intent() {
-        assert_eq!(ConversationGoal::from_intent("balance_transfer"), ConversationGoal::BalanceTransfer);
-        assert_eq!(ConversationGoal::from_intent("switch_lender"), ConversationGoal::BalanceTransfer);
-        assert_eq!(ConversationGoal::from_intent("loan_transfer"), ConversationGoal::BalanceTransfer);
-        assert_eq!(ConversationGoal::from_intent("eligibility_inquiry"), ConversationGoal::EligibilityCheck);
-        assert_eq!(ConversationGoal::from_intent("new_loan"), ConversationGoal::NewLoan);
-        assert_eq!(ConversationGoal::from_intent("branch_inquiry"), ConversationGoal::BranchVisit);
-        assert_eq!(ConversationGoal::from_intent("callback_request"), ConversationGoal::LeadCapture);
-        assert_eq!(ConversationGoal::from_intent("unknown"), ConversationGoal::Exploration);
+    fn test_default_goal() {
+        let state = GoldLoanDialogueState::new();
+        assert_eq!(state.goal_id(), DEFAULT_GOAL);
     }
 
     #[test]
-    fn test_goal_required_slots() {
-        assert_eq!(ConversationGoal::BalanceTransfer.required_slots(), &["current_lender", "loan_amount"]);
-        assert_eq!(ConversationGoal::EligibilityCheck.required_slots(), &["gold_weight"]);
-        assert_eq!(ConversationGoal::BranchVisit.required_slots(), &["location"]);
-        assert_eq!(ConversationGoal::LeadCapture.required_slots(), &["customer_name", "phone_number"]);
-    }
-
-    #[test]
-    fn test_goal_next_action_balance_transfer() {
-        // No slots -> explain process
-        let action = ConversationGoal::BalanceTransfer.next_action(&[]);
-        assert!(matches!(action, NextBestAction::ExplainProcess));
-
-        // Has lender only -> ask for amount
-        let action = ConversationGoal::BalanceTransfer.next_action(&["current_lender"]);
-        assert!(matches!(action, NextBestAction::AskFor(ref s) if s == "loan_amount"));
-
-        // Has lender + amount -> ask for rate
-        let action = ConversationGoal::BalanceTransfer.next_action(&["current_lender", "loan_amount"]);
-        assert!(matches!(action, NextBestAction::AskFor(ref s) if s == "current_interest_rate"));
-
-        // Has all -> call tool
-        let action = ConversationGoal::BalanceTransfer.next_action(&["current_lender", "loan_amount", "current_interest_rate"]);
-        assert!(matches!(action, NextBestAction::CallTool(ref s) if s == "calculate_savings"));
-    }
-
-    #[test]
-    fn test_goal_next_action_branch_visit() {
-        // No location -> ask for it
-        let action = ConversationGoal::BranchVisit.next_action(&[]);
-        assert!(matches!(action, NextBestAction::AskFor(ref s) if s == "location"));
-
-        // Has location -> call find_branches
-        let action = ConversationGoal::BranchVisit.next_action(&["location"]);
-        assert!(matches!(action, NextBestAction::CallTool(ref s) if s == "find_branches"));
-    }
-
-    #[test]
-    fn test_goal_update_from_intent() {
+    fn test_set_goal() {
         let mut state = GoldLoanDialogueState::new();
-        assert_eq!(state.conversation_goal(), ConversationGoal::Exploration);
+        assert_eq!(state.goal_id(), "exploration");
 
-        // Upgrade from exploration to balance transfer
-        state.update_goal_from_intent("balance_transfer", 1);
-        assert_eq!(state.conversation_goal(), ConversationGoal::BalanceTransfer);
-
-        // Should not downgrade back to exploration
-        state.update_goal_from_intent("unknown", 2);
-        assert_eq!(state.conversation_goal(), ConversationGoal::BalanceTransfer);
-
-        // Can upgrade to lead capture
-        state.update_goal_from_intent("callback_request", 3);
-        assert_eq!(state.conversation_goal(), ConversationGoal::LeadCapture);
+        state.set_goal("balance_transfer", 1);
+        assert_eq!(state.goal_id(), "balance_transfer");
+        assert_eq!(state.goal_set_turn(), 1);
     }
 
     #[test]
-    fn test_goal_completion() {
+    fn test_confirm_goal() {
         let mut state = GoldLoanDialogueState::new();
-        state.set_goal(ConversationGoal::BalanceTransfer, 0);
+        state.confirm_goal("new_loan", 2);
 
-        // 0% complete
-        assert_eq!(state.goal_completion(), 0.0);
-
-        // 50% complete (1 of 2 required slots)
-        state.set_slot_value("current_lender", "Muthoot", 0.9);
-        assert_eq!(state.goal_completion(), 0.5);
-
-        // 100% complete
-        state.set_slot_value("loan_amount", "1000000", 0.9);
-        assert_eq!(state.goal_completion(), 1.0);
+        assert_eq!(state.goal_id(), "new_loan");
+        assert!(state.is_goal_confirmed());
     }
 
     #[test]
-    fn test_missing_required_slots() {
+    fn test_goal_not_downgraded_to_exploration() {
         let mut state = GoldLoanDialogueState::new();
-        state.set_goal(ConversationGoal::BalanceTransfer, 0);
+        state.set_goal("balance_transfer", 1);
 
-        let missing = state.missing_required_slots();
-        assert!(missing.contains(&"current_lender"));
-        assert!(missing.contains(&"loan_amount"));
-
-        state.set_slot_value("current_lender", "Muthoot", 0.9);
-        let missing = state.missing_required_slots();
-        assert!(!missing.contains(&"current_lender"));
-        assert!(missing.contains(&"loan_amount"));
-    }
-
-    #[test]
-    fn test_should_trigger_tool() {
-        let mut state = GoldLoanDialogueState::new();
-        state.set_goal(ConversationGoal::BalanceTransfer, 0);
-
-        // Not enough info -> no tool
-        assert!(state.should_trigger_tool().is_none());
-
-        state.set_slot_value("current_lender", "Muthoot", 0.9);
-        state.set_slot_value("loan_amount", "1000000", 0.9);
-        assert!(state.should_trigger_tool().is_none()); // Still missing rate
-
-        state.set_slot_value("current_interest_rate", "18", 0.9);
-        assert_eq!(state.should_trigger_tool(), Some("calculate_savings".to_string()));
-    }
-
-    #[test]
-    fn test_goal_context_generation() {
-        let mut state = GoldLoanDialogueState::new();
-        state.set_goal(ConversationGoal::BalanceTransfer, 0);
-        state.set_slot_value("current_lender", "Muthoot", 0.9);
-
-        let context = state.goal_context();
-        assert!(context.contains("balance_transfer"));
-        assert!(context.contains("Missing required info"));
-        assert!(context.contains("loan_amount"));
-        assert!(context.contains("Balance Transfer Key Points"));
-        assert!(context.contains("Kotak pays off existing lender directly"));
+        // Setting exploration should not overwrite when already have a goal
+        state.set_goal(DEFAULT_GOAL, 2);
+        assert_eq!(state.goal_id(), "balance_transfer");
     }
 
     #[test]
@@ -1427,7 +1247,7 @@ mod tests {
     #[test]
     fn test_full_context_string() {
         let mut state = GoldLoanDialogueState::new();
-        state.set_goal(ConversationGoal::BalanceTransfer, 0);
+        state.set_goal("balance_transfer", 0);
         state.set_slot_value("customer_name", "Rahul", 0.9);
         state.set_slot_value("current_lender", "Muthoot", 0.9);
         state.set_slot_value("loan_amount", "1000000", 0.9);
@@ -1437,7 +1257,6 @@ mod tests {
         assert!(context.contains("Rahul"));
         assert!(context.contains("Muthoot"));
         assert!(context.contains("Current Goal: balance_transfer"));
-        assert!(context.contains("Next Action"));
     }
 
     // ====== Confirmation Prompt Tests ======

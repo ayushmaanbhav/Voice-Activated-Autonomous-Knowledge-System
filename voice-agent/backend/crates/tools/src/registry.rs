@@ -197,129 +197,98 @@ impl ToolCallTracker {
     }
 }
 
-/// Create default registry with gold loan tools
-pub fn create_default_registry() -> ToolRegistry {
-    let mut registry = ToolRegistry::new();
-
-    // Register gold loan tools
-    registry.register(crate::gold_loan::EligibilityCheckTool::new());
-    registry.register(crate::gold_loan::SavingsCalculatorTool::new());
-    registry.register(crate::gold_loan::LeadCaptureTool::new());
-    registry.register(crate::gold_loan::AppointmentSchedulerTool::new());
-    registry.register(crate::gold_loan::BranchLocatorTool::new());
-
-    // P0 FIX: Register missing tools that were implemented but not registered
-    registry.register(crate::gold_loan::GetGoldPriceTool::new());
-    registry.register(crate::gold_loan::EscalateToHumanTool::new());
-    registry.register(crate::gold_loan::SendSmsTool::new());
-
-    // Phase 6: Additional gold loan tools
-    registry.register(crate::gold_loan::DocumentChecklistTool::new());
-    registry.register(crate::gold_loan::CompetitorComparisonTool::new());
-
-    registry
-}
+// P15 FIX: Removed create_default_registry() - ToolsDomainView is now REQUIRED
+// Tools cannot be created without domain configuration.
+// Use create_registry_with_view() instead.
 
 // =============================================================================
-// P0-4 FIX: Domain Config Wiring with Hot-Reload Support
+// P13 FIX: Domain Config Wiring via ToolsDomainView
 // =============================================================================
 
-/// P0-4 FIX: Create registry with domain configuration injected
+/// P15 FIX: Create registry with REQUIRED ToolsDomainView configuration
 ///
-/// Uses the provided GoldLoanConfig instead of defaults, allowing
-/// for configurable interest rates, LTV, competitor rates, etc.
-pub fn create_registry_with_config(
-    gold_loan_config: &voice_agent_config::GoldLoanConfig,
+/// Uses ToolsDomainView for all configurable values (rates, LTV, competitor info).
+/// This is the ONLY way to create a tool registry - domain config is mandatory.
+pub fn create_registry_with_view(
+    view: Arc<voice_agent_config::ToolsDomainView>,
 ) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
 
-    // P0-4: Register gold loan tools with injected config
-    registry.register(crate::gold_loan::EligibilityCheckTool::with_config(
-        gold_loan_config.clone(),
-    ));
-    registry.register(crate::gold_loan::SavingsCalculatorTool::with_config(
-        gold_loan_config.clone(),
-    ));
+    // P15: Register gold loan tools - ALL require ToolsDomainView
+    registry.register(crate::gold_loan::EligibilityCheckTool::new(view.clone()));
+    registry.register(crate::gold_loan::SavingsCalculatorTool::new(view.clone()));
+    registry.register(crate::gold_loan::GetGoldPriceTool::new(view.clone()));
+    registry.register(crate::gold_loan::CompetitorComparisonTool::new(view.clone()));
+
+    // Tools that don't need domain config (CRM/calendar integrations only)
     registry.register(crate::gold_loan::LeadCaptureTool::new());
     registry.register(crate::gold_loan::AppointmentSchedulerTool::new());
     registry.register(crate::gold_loan::BranchLocatorTool::new());
-
-    // Tools that don't need config
-    registry.register(crate::gold_loan::GetGoldPriceTool::new());
     registry.register(crate::gold_loan::EscalateToHumanTool::new());
     registry.register(crate::gold_loan::SendSmsTool::new());
-
-    // Phase 6: Additional gold loan tools with config
     registry.register(crate::gold_loan::DocumentChecklistTool::new());
-    registry.register(crate::gold_loan::CompetitorComparisonTool::with_config(
-        gold_loan_config.clone(),
-    ));
 
     tracing::info!(
-        kotak_rate = gold_loan_config.kotak_interest_rate,
-        ltv = gold_loan_config.ltv_percent,
-        "Created tool registry with domain config"
+        bank_name = view.bank_name(),
+        base_rate = view.base_interest_rate(),
+        ltv = view.ltv_percent(),
+        "Created tool registry with ToolsDomainView (domain config required)"
     );
 
     registry
 }
 
-/// P0-4 FIX: Create registry with full domain configuration
+/// P13 FIX: Configurable tool registry with hot-reload support
 ///
-/// Takes the complete DomainConfig and extracts relevant parts for each tool.
-pub fn create_registry_with_domain_config(
-    domain_config: &voice_agent_config::DomainConfig,
-) -> ToolRegistry {
-    create_registry_with_config(&domain_config.gold_loan)
-}
-
-/// P0-4 FIX: Configurable tool registry with hot-reload support
-///
-/// Wraps a ToolRegistry with config management, allowing tools to be
+/// Wraps a ToolRegistry with ToolsDomainView management, allowing tools to be
 /// recreated when configuration changes.
 pub struct ConfigurableToolRegistry {
     inner: parking_lot::RwLock<ToolRegistry>,
-    config: parking_lot::RwLock<voice_agent_config::GoldLoanConfig>,
+    view: parking_lot::RwLock<Arc<voice_agent_config::ToolsDomainView>>,
 }
 
 impl ConfigurableToolRegistry {
-    /// Create with initial config
-    pub fn new(config: voice_agent_config::GoldLoanConfig) -> Self {
-        let registry = create_registry_with_config(&config);
+    /// Create with ToolsDomainView
+    pub fn new(view: Arc<voice_agent_config::ToolsDomainView>) -> Self {
+        let registry = create_registry_with_view(view.clone());
         Self {
             inner: parking_lot::RwLock::new(registry),
-            config: parking_lot::RwLock::new(config),
+            view: parking_lot::RwLock::new(view),
         }
     }
 
-    /// Create with default config
+    /// Create with default view from MasterDomainConfig
     pub fn with_defaults() -> Self {
-        Self::new(voice_agent_config::GoldLoanConfig::default())
+        let config = Arc::new(voice_agent_config::MasterDomainConfig::default());
+        let view = Arc::new(voice_agent_config::ToolsDomainView::new(config));
+        Self::new(view)
     }
 
     /// Reload configuration and recreate tools
     ///
-    /// This is the hot-reload entry point. Call this when config file changes.
-    pub fn reload(&self, new_config: voice_agent_config::GoldLoanConfig) {
+    /// This is the hot-reload entry point. Call this when config changes.
+    pub fn reload(&self, new_view: Arc<voice_agent_config::ToolsDomainView>) {
+        let old_view = self.view.read();
         tracing::info!(
-            old_rate = %self.config.read().kotak_interest_rate,
-            new_rate = %new_config.kotak_interest_rate,
+            old_rate = %old_view.base_interest_rate(),
+            new_rate = %new_view.base_interest_rate(),
             "Hot-reloading tool configuration"
         );
+        drop(old_view);
 
-        // Update config
-        *self.config.write() = new_config.clone();
+        // Update view
+        *self.view.write() = new_view.clone();
 
-        // Recreate registry with new config
-        let new_registry = create_registry_with_config(&new_config);
+        // Recreate registry with new view
+        let new_registry = create_registry_with_view(new_view);
         *self.inner.write() = new_registry;
 
         tracing::info!("Tool registry reloaded with new configuration");
     }
 
-    /// Get current config
-    pub fn config(&self) -> voice_agent_config::GoldLoanConfig {
-        self.config.read().clone()
+    /// Get current view
+    pub fn view(&self) -> Arc<voice_agent_config::ToolsDomainView> {
+        self.view.read().clone()
     }
 
     /// Execute a tool
@@ -386,9 +355,10 @@ impl ToolExecutor for ConfigurableToolRegistry {
     }
 }
 
-/// P4 FIX: Integration configuration for tool registry
-#[derive(Default)]
+/// P15 FIX: Integration configuration for tool registry - view is REQUIRED
 pub struct IntegrationConfig {
+    /// REQUIRED: ToolsDomainView for domain configuration
+    pub view: Arc<voice_agent_config::ToolsDomainView>,
     /// CRM integration for lead management
     pub crm: Option<Arc<dyn crate::integrations::CrmIntegration>>,
     /// Calendar integration for appointment scheduling
@@ -396,9 +366,19 @@ pub struct IntegrationConfig {
 }
 
 impl IntegrationConfig {
-    /// Create with stub integrations (for development/testing)
-    pub fn with_stubs() -> Self {
+    /// Create with required view
+    pub fn new(view: Arc<voice_agent_config::ToolsDomainView>) -> Self {
         Self {
+            view,
+            crm: None,
+            calendar: None,
+        }
+    }
+
+    /// Create with stub integrations (for development/testing)
+    pub fn with_stubs(view: Arc<voice_agent_config::ToolsDomainView>) -> Self {
+        Self {
+            view,
             crm: Some(Arc::new(crate::integrations::StubCrmIntegration::new())),
             calendar: Some(Arc::new(crate::integrations::StubCalendarIntegration::new())),
         }
@@ -420,26 +400,29 @@ impl IntegrationConfig {
     }
 }
 
-/// P4 FIX: Create registry with integration support
+/// P15 FIX: Create registry with integration support - view is REQUIRED
 ///
-/// Creates a tool registry with optional CRM and calendar integrations
-/// injected into the appropriate tools (LeadCaptureTool, AppointmentSchedulerTool).
+/// Creates a tool registry with:
+/// - REQUIRED ToolsDomainView for all domain configuration
+/// - Optional CRM and calendar integrations
 pub fn create_registry_with_integrations(config: IntegrationConfig) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
 
-    // Register gold loan tools
-    registry.register(crate::gold_loan::EligibilityCheckTool::new());
-    registry.register(crate::gold_loan::SavingsCalculatorTool::new());
+    // P15: All tools that need domain config use the REQUIRED view
+    registry.register(crate::gold_loan::EligibilityCheckTool::new(config.view.clone()));
+    registry.register(crate::gold_loan::SavingsCalculatorTool::new(config.view.clone()));
+    registry.register(crate::gold_loan::GetGoldPriceTool::new(config.view.clone()));
+    registry.register(crate::gold_loan::CompetitorComparisonTool::new(config.view.clone()));
     registry.register(crate::gold_loan::BranchLocatorTool::new());
 
-    // P4 FIX: Register LeadCaptureTool with CRM integration if available
+    // LeadCaptureTool with optional CRM integration
     if let Some(crm) = config.crm {
         registry.register(crate::gold_loan::LeadCaptureTool::with_crm(crm));
     } else {
         registry.register(crate::gold_loan::LeadCaptureTool::new());
     }
 
-    // P4 FIX: Register AppointmentSchedulerTool with calendar integration if available
+    // AppointmentSchedulerTool with optional calendar integration
     if let Some(calendar) = config.calendar {
         registry.register(crate::gold_loan::AppointmentSchedulerTool::with_calendar(
             calendar,
@@ -448,24 +431,28 @@ pub fn create_registry_with_integrations(config: IntegrationConfig) -> ToolRegis
         registry.register(crate::gold_loan::AppointmentSchedulerTool::new());
     }
 
-    // P0 FIX: Register missing tools that were implemented but not registered
-    registry.register(crate::gold_loan::GetGoldPriceTool::new());
     registry.register(crate::gold_loan::EscalateToHumanTool::new());
     registry.register(crate::gold_loan::SendSmsTool::new());
-
-    // Phase 6: Additional gold loan tools
     registry.register(crate::gold_loan::DocumentChecklistTool::new());
-    registry.register(crate::gold_loan::CompetitorComparisonTool::new());
+
+    tracing::info!(
+        bank_name = config.view.bank_name(),
+        base_rate = config.view.base_interest_rate(),
+        "Created tool registry with integrations (domain config required)"
+    );
 
     registry
 }
 
-/// P2 FIX: Full configuration for tool registry with persistence
+/// P15 FIX: Full configuration for tool registry with persistence - view is REQUIRED
 ///
-/// Includes both business integrations (CRM, Calendar) and persistence
-/// services (SMS, Gold Price) for production deployment.
-#[derive(Default)]
+/// Includes:
+/// - REQUIRED ToolsDomainView for domain configuration
+/// - Optional business integrations (CRM, Calendar)
+/// - Optional persistence services (SMS, Gold Price)
 pub struct FullIntegrationConfig {
+    /// REQUIRED: ToolsDomainView for domain configuration
+    pub view: Arc<voice_agent_config::ToolsDomainView>,
     /// CRM integration for lead management
     pub crm: Option<Arc<dyn crate::integrations::CrmIntegration>>,
     /// Calendar integration for appointment scheduling
@@ -474,14 +461,27 @@ pub struct FullIntegrationConfig {
     pub sms_service: Option<Arc<dyn voice_agent_persistence::SmsService>>,
     /// Gold price service (persisted to ScyllaDB)
     pub gold_price_service: Option<Arc<dyn voice_agent_persistence::GoldPriceService>>,
-    /// P2-1 FIX: Domain configuration for business logic (rates, LTV, etc.)
-    pub gold_loan_config: Option<voice_agent_config::GoldLoanConfig>,
 }
 
 impl FullIntegrationConfig {
-    /// Create from persistence layer
-    pub fn from_persistence(persistence: &voice_agent_persistence::PersistenceLayer) -> Self {
+    /// Create with required view
+    pub fn new(view: Arc<voice_agent_config::ToolsDomainView>) -> Self {
         Self {
+            view,
+            crm: None,
+            calendar: None,
+            sms_service: None,
+            gold_price_service: None,
+        }
+    }
+
+    /// Create from persistence layer with REQUIRED view
+    pub fn from_persistence(
+        view: Arc<voice_agent_config::ToolsDomainView>,
+        persistence: &voice_agent_persistence::PersistenceLayer,
+    ) -> Self {
+        Self {
+            view,
             crm: Some(Arc::new(crate::integrations::StubCrmIntegration::new())),
             calendar: Some(Arc::new(crate::integrations::StubCalendarIntegration::new())),
             sms_service: Some(
@@ -489,16 +489,7 @@ impl FullIntegrationConfig {
             ),
             gold_price_service: Some(Arc::new(persistence.gold_price.clone())
                 as Arc<dyn voice_agent_persistence::GoldPriceService>),
-            gold_loan_config: None, // Set separately via with_gold_loan_config()
         }
-    }
-
-    /// P2-1 FIX: Create from persistence layer with domain config
-    pub fn from_persistence_with_config(
-        persistence: &voice_agent_persistence::PersistenceLayer,
-        gold_loan_config: voice_agent_config::GoldLoanConfig,
-    ) -> Self {
-        Self::from_persistence(persistence).with_gold_loan_config(gold_loan_config)
     }
 
     /// Set CRM integration
@@ -530,52 +521,31 @@ impl FullIntegrationConfig {
         self.gold_price_service = Some(price);
         self
     }
-
-    /// P2-1 FIX: Set gold loan domain configuration
-    ///
-    /// This config controls business logic like:
-    /// - Interest rates (base and tiered)
-    /// - LTV percentages
-    /// - Gold price per gram
-    /// - Processing fees
-    /// - Competitor rates for comparison
-    pub fn with_gold_loan_config(mut self, config: voice_agent_config::GoldLoanConfig) -> Self {
-        self.gold_loan_config = Some(config);
-        self
-    }
 }
 
-/// P2 FIX: Create registry with full persistence support
+/// P15 FIX: Create registry with full persistence support - view is REQUIRED
 ///
 /// Creates a tool registry with:
-/// - Business integrations (CRM, Calendar)
-/// - Persistence services (SMS → ScyllaDB, Gold Price → ScyllaDB)
-/// - Domain configuration for business logic (rates, LTV, etc.)
-/// - All MCP tools properly wired
+/// - REQUIRED ToolsDomainView for domain configuration
+/// - Optional business integrations (CRM, Calendar)
+/// - Optional persistence services (SMS, Gold Price)
 pub fn create_registry_with_persistence(config: FullIntegrationConfig) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
 
-    // P2-1 FIX: Use domain config for tools that need business logic
-    // This ensures tools use configured rates/LTV instead of hardcoded defaults
-    let gold_loan_config = config.gold_loan_config.unwrap_or_default();
-
-    // Register gold loan tools WITH config (P2-1 FIX)
-    registry.register(crate::gold_loan::EligibilityCheckTool::with_config(
-        gold_loan_config.clone(),
-    ));
-    registry.register(crate::gold_loan::SavingsCalculatorTool::with_config(
-        gold_loan_config.clone(),
-    ));
+    // P15: All tools that need domain config use the REQUIRED view
+    registry.register(crate::gold_loan::EligibilityCheckTool::new(config.view.clone()));
+    registry.register(crate::gold_loan::SavingsCalculatorTool::new(config.view.clone()));
+    registry.register(crate::gold_loan::CompetitorComparisonTool::new(config.view.clone()));
     registry.register(crate::gold_loan::BranchLocatorTool::new());
 
-    // LeadCaptureTool with CRM integration
+    // LeadCaptureTool with optional CRM integration
     if let Some(crm) = config.crm {
         registry.register(crate::gold_loan::LeadCaptureTool::with_crm(crm));
     } else {
         registry.register(crate::gold_loan::LeadCaptureTool::new());
     }
 
-    // AppointmentSchedulerTool with calendar integration
+    // AppointmentSchedulerTool with optional calendar integration
     if let Some(calendar) = config.calendar {
         registry.register(crate::gold_loan::AppointmentSchedulerTool::with_calendar(
             calendar,
@@ -584,34 +554,34 @@ pub fn create_registry_with_persistence(config: FullIntegrationConfig) -> ToolRe
         registry.register(crate::gold_loan::AppointmentSchedulerTool::new());
     }
 
-    // P2 FIX: GetGoldPriceTool with persistence service
-    if let Some(price_service) = config.gold_price_service {
+    // GetGoldPriceTool with REQUIRED view and optional price service
+    if let Some(service) = config.gold_price_service {
         registry.register(crate::gold_loan::GetGoldPriceTool::with_price_service(
-            price_service,
+            service,
+            config.view.clone(),
         ));
     } else {
-        registry.register(crate::gold_loan::GetGoldPriceTool::new());
+        registry.register(crate::gold_loan::GetGoldPriceTool::new(config.view.clone()));
     }
 
-    // P2 FIX: EscalateToHumanTool (no persistence needed, logs via audit)
+    // EscalateToHumanTool (no domain config needed)
     registry.register(crate::gold_loan::EscalateToHumanTool::new());
 
-    // P2 FIX: SendSmsTool with persistence service
+    // SendSmsTool with optional persistence service
     if let Some(sms_service) = config.sms_service {
         registry.register(crate::gold_loan::SendSmsTool::with_sms_service(sms_service));
     } else {
         registry.register(crate::gold_loan::SendSmsTool::new());
     }
 
-    // Phase 6: Additional gold loan tools with config support
     registry.register(crate::gold_loan::DocumentChecklistTool::new());
-    registry.register(crate::gold_loan::CompetitorComparisonTool::with_config(
-        gold_loan_config,
-    ));
 
     tracing::info!(
         tools = registry.len(),
-        "Created tool registry with persistence support"
+        bank_name = config.view.bank_name(),
+        base_rate = config.view.base_interest_rate(),
+        ltv = config.view.ltv_percent(),
+        "Created tool registry with persistence (domain config required)"
     );
 
     registry
@@ -620,21 +590,30 @@ pub fn create_registry_with_persistence(config: FullIntegrationConfig) -> ToolRe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gold_loan::EligibilityCheckTool;
+
+    /// P15 FIX: Helper to create test view
+    fn test_view() -> Arc<voice_agent_config::ToolsDomainView> {
+        let config = Arc::new(voice_agent_config::MasterDomainConfig::default());
+        Arc::new(voice_agent_config::ToolsDomainView::new(config))
+    }
 
     #[test]
     fn test_registry_basic() {
         let mut registry = ToolRegistry::new();
         assert!(registry.is_empty());
 
-        registry.register(EligibilityCheckTool::new());
+        // P15 FIX: Tools now require view
+        let view = test_view();
+        registry.register(crate::gold_loan::EligibilityCheckTool::new(view));
         assert_eq!(registry.len(), 1);
         assert!(registry.has("check_eligibility"));
     }
 
     #[test]
     fn test_registry_list_tools() {
-        let registry = create_default_registry();
+        // P15 FIX: Use create_registry_with_view
+        let view = test_view();
+        let registry = create_registry_with_view(view);
         let tools = registry.list_tools();
 
         assert!(!tools.is_empty());
@@ -656,66 +635,67 @@ mod tests {
         assert_eq!(tracker.all().len(), 1);
     }
 
-    // P4 FIX: Tests for integration config
+    // P15 FIX: Tests for integration config (now require view)
 
     #[test]
-    fn test_integration_config_default() {
-        let config = IntegrationConfig::default();
+    fn test_integration_config_new() {
+        let view = test_view();
+        let config = IntegrationConfig::new(view);
         assert!(config.crm.is_none());
         assert!(config.calendar.is_none());
     }
 
     #[test]
     fn test_integration_config_with_stubs() {
-        let config = IntegrationConfig::with_stubs();
+        let view = test_view();
+        let config = IntegrationConfig::with_stubs(view);
         assert!(config.crm.is_some());
         assert!(config.calendar.is_some());
     }
 
     #[test]
     fn test_registry_with_integrations() {
-        let config = IntegrationConfig::with_stubs();
+        let view = test_view();
+        let config = IntegrationConfig::with_stubs(view);
         let registry = create_registry_with_integrations(config);
 
-        // Phase 6: Should have all 10 tools (8 original + 2 Phase 6 tools)
+        // Should have all 10 tools
         assert_eq!(registry.len(), 10);
         assert!(registry.has("check_eligibility"));
         assert!(registry.has("calculate_savings"));
         assert!(registry.has("capture_lead"));
         assert!(registry.has("schedule_appointment"));
         assert!(registry.has("find_branches"));
-        // P0 FIX: Verify new tools are registered
         assert!(registry.has("get_gold_price"));
         assert!(registry.has("escalate_to_human"));
         assert!(registry.has("send_sms"));
-        // Phase 6: New tools
         assert!(registry.has("get_document_checklist"));
         assert!(registry.has("compare_lenders"));
     }
 
     #[test]
     fn test_registry_without_integrations() {
-        let config = IntegrationConfig::default();
+        let view = test_view();
+        let config = IntegrationConfig::new(view);
         let registry = create_registry_with_integrations(config);
 
-        // Phase 6: Should still have all 10 tools (just without integrations)
+        // Should still have all 10 tools (just without integrations)
         assert_eq!(registry.len(), 10);
         assert!(registry.has("capture_lead"));
         assert!(registry.has("schedule_appointment"));
-        // P0 FIX: Verify new tools are registered
         assert!(registry.has("get_gold_price"));
         assert!(registry.has("escalate_to_human"));
         assert!(registry.has("send_sms"));
-        // Phase 6: New tools
         assert!(registry.has("get_document_checklist"));
         assert!(registry.has("compare_lenders"));
     }
 
     #[test]
-    fn test_default_registry_has_all_tools() {
-        let registry = create_default_registry();
+    fn test_registry_with_view_has_all_tools() {
+        let view = test_view();
+        let registry = create_registry_with_view(view);
 
-        // Phase 6: Registry should have all 10 tools (8 original + 2 new)
+        // Registry should have all 10 tools
         assert_eq!(registry.len(), 10);
         assert!(registry.has("check_eligibility"));
         assert!(registry.has("calculate_savings"));
@@ -725,7 +705,6 @@ mod tests {
         assert!(registry.has("get_gold_price"));
         assert!(registry.has("escalate_to_human"));
         assert!(registry.has("send_sms"));
-        // Phase 6: New tools
         assert!(registry.has("get_document_checklist"));
         assert!(registry.has("compare_lenders"));
     }

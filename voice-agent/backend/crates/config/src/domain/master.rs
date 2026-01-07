@@ -12,6 +12,8 @@ use std::path::Path;
 use crate::ConfigError;
 use super::branches::BranchesConfig;
 use super::competitors::CompetitorsConfig;
+use super::features::FeaturesConfig;
+use super::goals::GoalsConfig;
 use super::objections::ObjectionsConfig;
 use super::prompts::PromptsConfig;
 use super::scoring::ScoringConfig;
@@ -26,6 +28,9 @@ use super::tools::ToolsConfig;
 pub struct BrandConfig {
     pub bank_name: String,
     pub agent_name: String,
+    /// P13 FIX: Agent role/title for persona goal (e.g., "Gold Loan Advisor")
+    #[serde(default)]
+    pub agent_role: String,
     pub helpline: String,
     #[serde(default)]
     pub website: String,
@@ -34,6 +39,9 @@ pub struct BrandConfig {
 /// Interest rate tier
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateTier {
+    /// Tier name (e.g., "Standard", "Premium", "Elite")
+    #[serde(default)]
+    pub name: String,
     /// Maximum amount for this tier (null = unlimited)
     pub max_amount: Option<f64>,
     /// Interest rate percentage
@@ -112,6 +120,23 @@ pub struct HighValueConfig {
     pub features: Vec<String>,
 }
 
+/// P15 FIX: Domain vocabulary configuration for text processing
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VocabularyConfig {
+    /// Domain-specific terms to preserve
+    #[serde(default)]
+    pub terms: Vec<String>,
+    /// Common phrases in domain
+    #[serde(default)]
+    pub phrases: Vec<String>,
+    /// Abbreviations and their expansions
+    #[serde(default)]
+    pub abbreviations: HashMap<String, String>,
+    /// Entity types to preserve
+    #[serde(default)]
+    pub preserve_entities: Vec<String>,
+}
+
 /// Master domain configuration - the complete config for a domain
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MasterDomainConfig {
@@ -137,6 +162,9 @@ pub struct MasterDomainConfig {
     /// High-value customer config
     #[serde(default)]
     pub high_value: HighValueConfig,
+    /// P15 FIX: Domain vocabulary for text processing
+    #[serde(default)]
+    pub vocabulary: VocabularyConfig,
     /// Slot definitions for DST (loaded from slots.yaml)
     #[serde(skip)]
     pub slots: SlotsConfig,
@@ -167,6 +195,12 @@ pub struct MasterDomainConfig {
     /// Customer segment definitions (loaded from segments.yaml)
     #[serde(skip)]
     pub segments: SegmentsConfig,
+    /// Goals configuration (loaded from goals.yaml)
+    #[serde(skip)]
+    pub goals: GoalsConfig,
+    /// Features configuration (loaded from features.yaml)
+    #[serde(skip)]
+    pub features: FeaturesConfig,
     /// Raw JSON for dynamic access
     #[serde(skip)]
     raw_config: Option<JsonValue>,
@@ -187,6 +221,7 @@ impl Default for MasterDomainConfig {
             competitors: HashMap::new(),
             products: HashMap::new(),
             high_value: HighValueConfig::default(),
+            vocabulary: VocabularyConfig::default(),
             slots: SlotsConfig::default(),
             stages: StagesConfig::default(),
             scoring: ScoringConfig::default(),
@@ -197,6 +232,8 @@ impl Default for MasterDomainConfig {
             sms_templates: SmsTemplatesConfig::default(),
             competitors_config: CompetitorsConfig::default(),
             segments: SegmentsConfig::default(),
+            goals: GoalsConfig::default(),
+            features: FeaturesConfig::default(),
             raw_config: None,
         }
     }
@@ -438,6 +475,48 @@ impl MasterDomainConfig {
             }
         } else {
             tracing::debug!("No segments config found at {:?}", segments_path);
+        }
+
+        // 15. Load goals configuration (optional)
+        let goals_path = config_dir.join(format!("domains/{}/goals.yaml", domain_id));
+        if goals_path.exists() {
+            match GoalsConfig::load(&goals_path) {
+                Ok(goals) => {
+                    tracing::info!(
+                        goals_count = goals.goals.len(),
+                        intent_mappings_count = goals.intent_mappings.len(),
+                        "Loaded goals configuration"
+                    );
+                    config.goals = goals;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load goals config: {}", e);
+                }
+            }
+        } else {
+            tracing::debug!("No goals config found at {:?}", goals_path);
+        }
+
+        // 16. Load features configuration (optional)
+        let features_path = config_dir.join(format!("domains/{}/features.yaml", domain_id));
+        if features_path.exists() {
+            let content = std::fs::read_to_string(&features_path)
+                .map_err(|e| ConfigError::ParseError(format!("Failed to read features config: {}", e)))?;
+            match serde_yaml::from_str::<FeaturesConfig>(&content) {
+                Ok(features) => {
+                    tracing::info!(
+                        features_count = features.features.len(),
+                        segments_with_features = features.segment_features.len(),
+                        "Loaded features configuration"
+                    );
+                    config.features = features;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to parse features config: {}", e);
+                }
+            }
+        } else {
+            tracing::debug!("No features config found at {:?}", features_path);
         }
 
         tracing::info!(

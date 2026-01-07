@@ -396,9 +396,13 @@ async fn test_telugu_intent_detection() {
 #[tokio::test]
 async fn test_tool_eligibility_check() {
     use serde_json::json;
+    use std::sync::Arc;
     use voice_agent_tools::{EligibilityCheckTool, Tool};
 
-    let tool = EligibilityCheckTool::new();
+    // P15 FIX: Create view before creating tool
+    let domain_config = Arc::new(voice_agent_config::MasterDomainConfig::default());
+    let view = Arc::new(voice_agent_config::ToolsDomainView::new(domain_config));
+    let tool = EligibilityCheckTool::new(view);
 
     // Standard eligibility check
     let input = json!({
@@ -433,9 +437,13 @@ async fn test_tool_eligibility_check() {
 #[tokio::test]
 async fn test_tool_savings_calculator() {
     use serde_json::json;
+    use std::sync::Arc;
     use voice_agent_tools::{SavingsCalculatorTool, Tool};
 
-    let tool = SavingsCalculatorTool::new();
+    // P15 FIX: Create view before creating tool
+    let domain_config = Arc::new(voice_agent_config::MasterDomainConfig::default());
+    let view = Arc::new(voice_agent_config::ToolsDomainView::new(domain_config));
+    let tool = SavingsCalculatorTool::new(view);
 
     let input = json!({
         "current_loan_amount": 100000.0,
@@ -735,10 +743,15 @@ async fn test_rag_config_integration() {
 #[tokio::test]
 async fn test_tool_registry_integration() {
     use serde_json::json;
+    use std::sync::Arc;
     use voice_agent_tools::{create_registry_with_integrations, IntegrationConfig, ToolExecutor};
 
-    // Create registry with stub integrations
-    let config = IntegrationConfig::with_stubs();
+    // P15 FIX: Create view before creating registry
+    let domain_config = Arc::new(voice_agent_config::MasterDomainConfig::default());
+    let view = Arc::new(voice_agent_config::ToolsDomainView::new(domain_config));
+
+    // Create registry with stub integrations and required view
+    let config = IntegrationConfig::with_stubs(view);
     let registry = create_registry_with_integrations(config);
 
     // Phase 6: Updated to 10 tools after Phase 6 additions (DocumentChecklist, CompetitorComparison)
