@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
-use voice_agent_agent::{AgentConfig, GoldLoanAgent};
+use voice_agent_agent::{AgentConfig, DomainAgent};
 
 use crate::ServerError;
 
@@ -332,7 +332,7 @@ pub struct Session {
     /// Session ID
     pub id: String,
     /// Agent instance
-    pub agent: Arc<GoldLoanAgent>,
+    pub agent: Arc<DomainAgent>,
     /// Creation time
     pub created_at: Instant,
     /// Last activity
@@ -348,7 +348,7 @@ impl Session {
     pub fn new(id: impl Into<String>, config: AgentConfig) -> Self {
         let id = id.into();
         Self {
-            agent: Arc::new(GoldLoanAgent::new(&id, config)),
+            agent: Arc::new(DomainAgent::new(&id, config)),
             id,
             created_at: Instant::now(),
             last_activity: RwLock::new(Instant::now()),
@@ -365,7 +365,7 @@ impl Session {
         vector_store: Arc<voice_agent_rag::VectorStore>,
     ) -> Self {
         let id = id.into();
-        let agent = GoldLoanAgent::new(&id, config).with_vector_store(vector_store);
+        let agent = DomainAgent::new(&id, config).with_vector_store(vector_store);
         Self {
             agent: Arc::new(agent),
             id,
@@ -385,7 +385,7 @@ impl Session {
         tools: Arc<voice_agent_tools::ToolRegistry>,
     ) -> Self {
         let id = id.into();
-        let mut agent = GoldLoanAgent::new(&id, config).with_tools(tools);
+        let mut agent = DomainAgent::new(&id, config).with_tools(tools);
         if let Some(vs) = vector_store {
             agent = agent.with_vector_store(vs);
         }

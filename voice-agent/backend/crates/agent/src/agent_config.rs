@@ -1,6 +1,6 @@
 //! Agent Configuration Types
 //!
-//! Configuration structs for the GoldLoanAgent.
+//! Configuration structs for the DomainAgent (formerly GoldLoanAgent).
 
 use voice_agent_config::PersonaConfig;
 use voice_agent_llm::{LlmProviderConfig, SpeculativeConfig, SpeculativeMode};

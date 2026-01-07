@@ -7,7 +7,7 @@
 //! 1. Receive audio (webm/opus, base64 encoded)
 //! 2. Convert to PCM 16kHz mono
 //! 3. STT via Rust IndicConformer
-//! 4. LLM processing via GoldLoanAgent (with RAG + tools)
+//! 4. LLM processing via DomainAgent (with RAG + tools)
 //! 5. TTS response generation
 //! 6. Return transcripts and audio
 

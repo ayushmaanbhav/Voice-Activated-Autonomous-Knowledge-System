@@ -61,10 +61,11 @@ pub use stage::{
 pub use voice_agent_text_processing::intent::{
     DetectedIntent, Intent, IntentDetector, Slot, SlotType,
 };
-// P2 FIX: Persuasion engine exports
-pub use agent::GoldLoanAgent;
-/// P5 FIX: Type alias for domain-agnostic naming (GoldLoanAgent is now generic)
-pub type DomainAgent = GoldLoanAgent;
+// Phase 2: Export renamed DomainAgent (formerly GoldLoanAgent)
+pub use agent::DomainAgent;
+/// Backwards compatibility alias for GoldLoanAgent
+#[deprecated(since = "0.2.0", note = "Use DomainAgent instead")]
+pub type GoldLoanAgent = DomainAgent;
 // P1-SRP: Export agent config types
 pub use agent_config::{
     AgentConfig, AgentEvent, PersonaTraits, SmallModelConfig, SpeculativeDecodingConfig,

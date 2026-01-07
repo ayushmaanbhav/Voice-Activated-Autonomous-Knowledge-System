@@ -27,7 +27,7 @@ use voice_agent_pipeline::{
 };
 use voice_agent_transport::{SessionConfig, TransportEvent, TransportSession};
 
-use crate::{AgentConfig, AgentError, AgentEvent, GoldLoanAgent};
+use crate::{AgentConfig, AgentError, AgentEvent, DomainAgent};
 
 /// Voice session configuration
 #[derive(Debug, Clone)]
@@ -138,7 +138,7 @@ pub struct VoiceSession {
     session_id: String,
     config: VoiceSessionConfig,
     state: Arc<RwLock<VoiceSessionState>>,
-    agent: Arc<GoldLoanAgent>,
+    agent: Arc<DomainAgent>,
     stt: Arc<StreamingStt>,
     tts: Arc<StreamingTts>,
     /// Silero VAD (optional, if enabled)
@@ -172,7 +172,7 @@ impl VoiceSession {
         let (transport_event_tx, _transport_event_rx) = mpsc::channel(100);
 
         // Create agent
-        let agent = Arc::new(GoldLoanAgent::without_llm(
+        let agent = Arc::new(DomainAgent::without_llm(
             session_id.clone(),
             config.agent.clone(),
         ));
@@ -694,7 +694,7 @@ impl VoiceSession {
     }
 
     /// Get agent reference
-    pub fn agent(&self) -> &GoldLoanAgent {
+    pub fn agent(&self) -> &DomainAgent {
         &self.agent
     }
 

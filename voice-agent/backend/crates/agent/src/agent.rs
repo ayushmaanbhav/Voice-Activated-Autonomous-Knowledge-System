@@ -1,6 +1,14 @@
-//! Gold Loan Voice Agent
+//! Domain Voice Agent
 //!
 //! Main agent implementation combining all components.
+//!
+//! ## Phase 2 (Domain-Agnosticism): DomainAgent
+//!
+//! The agent is now named `DomainAgent` to reflect its domain-agnostic design.
+//! It uses traits internally (ConversationContext, DialogueStateTracking,
+//! PersuasionStrategy) for flexibility and testability.
+//!
+//! `DomainAgent` is retained as a type alias for backwards compatibility.
 
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -51,8 +59,16 @@ struct PrefetchEntry {
     timestamp: std::time::Instant,
 }
 
-/// Gold Loan Voice Agent
-pub struct GoldLoanAgent {
+/// Domain Voice Agent
+///
+/// A domain-agnostic voice agent that uses configuration and traits
+/// to handle any business domain. The agent internally uses:
+/// - `ConversationContext` trait for conversation management
+/// - `DialogueStateTracking` trait for slot-based state
+/// - `PersuasionStrategy` trait for objection handling
+///
+/// For backwards compatibility, `DomainAgent` is available as a type alias.
+pub struct DomainAgent {
     config: AgentConfig,
     conversation: Arc<Conversation>,
     tools: Arc<ToolRegistry>,
@@ -91,7 +107,7 @@ pub struct GoldLoanAgent {
     domain_view: Option<Arc<AgentDomainView>>,
 }
 
-impl GoldLoanAgent {
+impl DomainAgent {
     /// Create a new agent
     pub fn new(session_id: impl Into<String>, config: AgentConfig) -> Self {
         let (event_tx, _) = broadcast::channel(100);
@@ -2400,14 +2416,14 @@ impl GoldLoanAgent {
     }
 }
 
-// P1-1 FIX: Implement Agent trait for GoldLoanAgent
+// P1-1 FIX: Implement Agent trait for DomainAgent
 use crate::traits::{Agent, PersonalizableAgent, PrefetchingAgent};
 
 #[async_trait::async_trait]
-impl Agent for GoldLoanAgent {
+impl Agent for DomainAgent {
     async fn process(&self, input: &str) -> Result<String, AgentError> {
         // Delegate to the inherent method
-        GoldLoanAgent::process(self, input).await
+        DomainAgent::process(self, input).await
     }
 
     async fn process_stream(
@@ -2415,56 +2431,56 @@ impl Agent for GoldLoanAgent {
         input: &str,
     ) -> Result<tokio::sync::mpsc::Receiver<String>, AgentError> {
         // Delegate to the inherent method
-        GoldLoanAgent::process_stream(self, input).await
+        DomainAgent::process_stream(self, input).await
     }
 
     fn stage(&self) -> ConversationStage {
-        GoldLoanAgent::stage(self)
+        DomainAgent::stage(self)
     }
 
     fn user_language(&self) -> Language {
-        GoldLoanAgent::user_language(self)
+        DomainAgent::user_language(self)
     }
 
     fn subscribe(&self) -> broadcast::Receiver<AgentEvent> {
-        GoldLoanAgent::subscribe(self)
+        DomainAgent::subscribe(self)
     }
 
     fn name(&self) -> &str {
-        GoldLoanAgent::name(self)
+        DomainAgent::name(self)
     }
 
     fn end(&self, reason: crate::conversation::EndReason) {
-        GoldLoanAgent::end(self, reason)
+        DomainAgent::end(self, reason)
     }
 }
 
 #[async_trait::async_trait]
-impl PrefetchingAgent for GoldLoanAgent {
+impl PrefetchingAgent for DomainAgent {
     async fn prefetch_on_partial(&self, partial_transcript: &str, confidence: f32) -> bool {
-        GoldLoanAgent::prefetch_on_partial(self, partial_transcript, confidence).await
+        DomainAgent::prefetch_on_partial(self, partial_transcript, confidence).await
     }
 
     fn prefetch_background(&self, partial_transcript: String, confidence: f32) {
-        GoldLoanAgent::prefetch_background(self, partial_transcript, confidence)
+        DomainAgent::prefetch_background(self, partial_transcript, confidence)
     }
 
     fn clear_prefetch_cache(&self) {
-        GoldLoanAgent::clear_prefetch_cache(self)
+        DomainAgent::clear_prefetch_cache(self)
     }
 }
 
-impl PersonalizableAgent for GoldLoanAgent {
+impl PersonalizableAgent for DomainAgent {
     fn set_customer_profile(&self, profile: &voice_agent_core::CustomerProfile) {
-        GoldLoanAgent::set_customer_profile(self, profile)
+        DomainAgent::set_customer_profile(self, profile)
     }
 
     fn set_customer_name(&self, name: impl Into<String>) {
-        GoldLoanAgent::set_customer_name(self, name)
+        DomainAgent::set_customer_name(self, name)
     }
 
     fn set_customer_segment(&self, segment: voice_agent_core::CustomerSegment) {
-        GoldLoanAgent::set_customer_segment(self, segment)
+        DomainAgent::set_customer_segment(self, segment)
     }
 }
 
@@ -2503,7 +2519,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_creation() {
-        let agent = GoldLoanAgent::new("test-session", AgentConfig::default());
+        let agent = DomainAgent::new("test-session", AgentConfig::default());
 
         assert_eq!(agent.name(), "Priya");
         assert_eq!(agent.stage(), ConversationStage::Greeting);
@@ -2511,7 +2527,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_process() {
-        let agent = GoldLoanAgent::new("test", AgentConfig::default());
+        let agent = DomainAgent::new("test", AgentConfig::default());
 
         let response = agent.process("Hello").await.unwrap();
 
@@ -2531,7 +2547,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_conversation_flow() {
-        let agent = GoldLoanAgent::new("test", AgentConfig::default());
+        let agent = DomainAgent::new("test", AgentConfig::default());
 
         // Greeting
         let _ = agent.process("Hello").await.unwrap();
@@ -2555,7 +2571,7 @@ mod tests {
             language: "en".to_string(),
             ..AgentConfig::default()
         };
-        let agent = GoldLoanAgent::without_llm("test-english", config);
+        let agent = DomainAgent::without_llm("test-english", config);
 
         let response = agent.process("Hello").await.unwrap();
 
@@ -2586,7 +2602,7 @@ mod tests {
             language: "hi".to_string(),
             ..AgentConfig::default()
         };
-        let agent = GoldLoanAgent::without_llm("test-hindi", config);
+        let agent = DomainAgent::without_llm("test-hindi", config);
 
         let response = agent.process("Hello").await.unwrap();
 
@@ -2601,7 +2617,7 @@ mod tests {
     #[tokio::test]
     async fn test_prefetch_requires_rag_components() {
         // P2 FIX: Test prefetch behavior without vector store
-        let agent = GoldLoanAgent::without_llm("test-prefetch", AgentConfig::default());
+        let agent = DomainAgent::without_llm("test-prefetch", AgentConfig::default());
 
         // Should return false when vector_store is not set
         let result = agent
@@ -2613,7 +2629,7 @@ mod tests {
     #[tokio::test]
     async fn test_prefetch_skips_short_partials() {
         // P2 FIX: Test that very short partials are skipped
-        let agent = GoldLoanAgent::without_llm("test-prefetch-short", AgentConfig::default());
+        let agent = DomainAgent::without_llm("test-prefetch-short", AgentConfig::default());
 
         // Single word should be skipped (returns false regardless of vector store)
         let result = agent.prefetch_on_partial("hello", 0.9).await;
@@ -2623,7 +2639,7 @@ mod tests {
     #[test]
     fn test_prefetch_cache_lifecycle() {
         // P2 FIX: Test prefetch cache clear
-        let agent = GoldLoanAgent::without_llm("test-cache", AgentConfig::default());
+        let agent = DomainAgent::without_llm("test-cache", AgentConfig::default());
 
         // Initially empty
         assert!(agent.get_prefetch_results("test query").is_none());
