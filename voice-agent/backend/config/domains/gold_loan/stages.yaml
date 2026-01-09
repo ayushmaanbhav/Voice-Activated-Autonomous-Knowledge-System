@@ -232,3 +232,91 @@ transition_triggers:
       - "(?i)thank.*bye"
       - "(?i)good.*bye"
       - "(?i)talk.*later"
+
+# Intent-based stage transitions (P16 FIX: domain-agnostic transition matrix)
+# Maps intent → current_stage → target_stage
+# This replaces the hardcoded match statement in conversation.rs
+intent_transitions:
+  # Greeting intent - after rapport, move to discovery
+  greeting:
+    greeting:
+      target: discovery
+      min_turns: 1  # Only transition after at least 1 turn
+
+  # Loan/eligibility inquiry - move through funnel
+  loan_inquiry:
+    greeting: discovery
+    discovery: qualification
+
+  eligibility_query:
+    greeting: discovery
+    discovery: qualification
+
+  # Interest rate query - customer interested in rates
+  interest_rate_query:
+    greeting: presentation
+    discovery: presentation
+    qualification: presentation
+
+  # Competitor reference - need to understand their situation
+  competitor_reference:
+    greeting: discovery
+
+  # Branch locator - ready to visit
+  branch_locator:
+    presentation: closing
+    objection_handling: closing
+
+  # Schedule visit/appointment - ready to commit
+  schedule_visit:
+    presentation: closing
+    objection_handling: closing
+    discovery: closing  # Fast track
+
+  schedule_appointment:
+    presentation: closing
+    objection_handling: closing
+    discovery: closing
+
+  book_appointment:
+    presentation: closing
+    objection_handling: closing
+    discovery: closing
+
+  # Objection - handle concerns (except when already handling)
+  objection:
+    discovery: objection_handling
+    qualification: objection_handling
+    presentation: objection_handling
+    closing: objection_handling
+
+  # Affirmative - agreement to proceed
+  affirmative:
+    greeting: discovery
+    discovery: qualification
+    objection_handling: presentation
+    presentation: closing
+    closing: farewell
+
+  # Negative - might need objection handling
+  negative:
+    closing: objection_handling
+    presentation: objection_handling
+
+  # Thank you - positive signal
+  thank_you:
+    closing: farewell
+    objection_handling: presentation
+
+  # Farewell - end conversation (from any stage)
+  farewell:
+    greeting: farewell
+    discovery: farewell
+    qualification: farewell
+    presentation: farewell
+    objection_handling: farewell
+    closing: farewell
+
+  # Confusion - may need to revisit discovery
+  confusion:
+    presentation: discovery

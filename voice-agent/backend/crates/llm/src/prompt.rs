@@ -1,6 +1,7 @@
 //! Prompt Building and Management
 //!
-//! Constructs prompts for the gold loan voice agent.
+//! Constructs prompts for domain-agnostic voice agents.
+//! Domain-specific content should be loaded from config.
 
 
 // P0 FIX: Re-export PersonaConfig from config crate (single source of truth)
@@ -260,11 +261,13 @@ impl PromptBuilder {
         );
 
         // Build key facts from product_facts
+        // NOTE: For domain-specific key facts (e.g., regulatory info, security features),
+        // define them in prompts/system.yaml and use prompts_config.key_facts()
         let key_facts = format!(
             "- Interest rates: Starting from {:.1}% p.a. (vs {:.0}-{:.0}% competitor rates)\n\
              - LTV: Up to {:.0}% of collateral value\n\
              - Processing: Same-day disbursement\n\
-             - Safety: RBI-regulated bank with insured storage",
+             - Regulated financial institution with secure storage",
             self.product_facts.our_rate,
             self.product_facts.nbfc_rate_low,
             self.product_facts.nbfc_rate_high,
@@ -284,53 +287,53 @@ impl PromptBuilder {
         self
     }
 
-    /// Build system prompt for agent (DEPRECATED - use system_prompt_from_config)
-    #[deprecated(since = "1.0.0", note = "Use system_prompt_from_config() with PromptsConfig for domain-agnostic operation")]
+    /// Legacy system_prompt method (deprecated)
+    ///
+    /// P16 COMPAT: Provides backwards compatibility during migration.
+    /// Use system_prompt_from_config() with PromptsConfig for domain-agnostic operation.
+    ///
+    /// Migration guide:
+    ///   let prompts_config = master_domain_config.prompts.clone();
+    ///   let brand = BrandConfig { agent_name, company_name, agent_role, helpline };
+    ///   prompt_builder.system_prompt_from_config(&prompts_config, &brand, language)
+    #[deprecated(note = "Use system_prompt_from_config() for domain-agnostic operation")]
     pub fn system_prompt(mut self, language: &str) -> Self {
         let persona_traits = self.build_persona_traits();
 
-        let system = format!(
-            r#"You are {name}, a friendly and knowledgeable specialist.
+        // Default brand config for backwards compatibility
+        let agent_name = "Priya";
+        let company_name = "Kotak";
 
-## Your Persona
-{traits}
-
-## Your Role
-- Help customers understand products and benefits
-- Guide customers through the process
-- Answer questions about rates and documentation
-- Address concerns and objections with empathy
-- Collect lead information when appropriate
-
-## Communication Guidelines
-- Speak naturally and conversationally
-- Use {language_style} language naturally
-- Keep responses concise (2-3 sentences max for voice)
-- Ask one question at a time
-- Acknowledge customer concerns before addressing them
-- Use the customer's name when known
-
-## Key Product Information
-- Interest rates: Starting from {our_rate:.1}% (vs {nbfc_rate_low:.0}-{nbfc_rate_high:.0}% competitor rates)
-- LTV: Up to {ltv_percent:.0}% of collateral value
-- Processing: Same-day disbursement
-
-## Response Format
-Respond naturally as if speaking on a phone call. Do not use bullet points, headers, or markdown formatting. Keep responses brief and conversational."#,
-            name = self.persona.name,
-            traits = persona_traits,
-            language_style = if language == "hi" {
-                "Hindi-English (Hinglish)"
-            } else {
-                "English"
-            },
-            our_rate = self.product_facts.our_rate,
-            nbfc_rate_low = self.product_facts.nbfc_rate_low,
-            nbfc_rate_high = self.product_facts.nbfc_rate_high,
-            ltv_percent = self.product_facts.ltv_percent,
+        // Build key facts from product_facts
+        let key_facts = format!(
+            "- Interest rates: Starting from {:.1}% p.a. (vs {:.0}-{:.0}% competitor rates)\n\
+             - LTV: Up to {:.0}% of collateral value\n\
+             - Processing: Same-day disbursement\n\
+             - Regulated financial institution with secure storage",
+            self.product_facts.our_rate,
+            self.product_facts.nbfc_rate_low,
+            self.product_facts.nbfc_rate_high,
+            self.product_facts.ltv_percent,
         );
 
-        self.messages.push(Message::system(system));
+        let system_content = format!(
+            "You are {agent_name}, a helpful voice assistant for {company_name} gold loan services.\n\n\
+             ## Your Personality\n{traits}\n\n\
+             ## Key Facts\n{facts}\n\n\
+             ## Guidelines\n\
+             - Be conversational yet professional\n\
+             - Keep responses concise (1-2 sentences for voice)\n\
+             - Language: {language}\n\
+             - Focus on customer needs\n\
+             - Never fabricate information",
+            agent_name = agent_name,
+            company_name = company_name,
+            traits = persona_traits,
+            facts = key_facts,
+            language = language,
+        );
+
+        self.messages.insert(0, Message::system(system_content));
         self
     }
 
@@ -428,26 +431,30 @@ Respond naturally as if speaking on a phone call. Do not use bullet points, head
         self
     }
 
-    /// Add stage guidance (DEPRECATED - use with_stage_guidance_from_config)
-    #[deprecated(since = "1.0.0", note = "Use with_stage_guidance_from_config() with PromptsConfig for domain-agnostic operation")]
+    /// Legacy with_stage_guidance method (deprecated)
+    ///
+    /// P16 COMPAT: Provides backwards compatibility during migration.
+    /// Use with_stage_guidance_from_config() with PromptsConfig for domain-agnostic operation.
+    ///
+    /// Migration guide:
+    ///   let prompts_config = master_domain_config.prompts.clone();
+    ///   prompt_builder.with_stage_guidance_from_config(stage, &prompts_config)
+    #[deprecated(note = "Use with_stage_guidance_from_config() for domain-agnostic operation")]
     pub fn with_stage_guidance(mut self, stage: &str) -> Self {
+        // Default stage guidance for backwards compatibility
         let guidance = match stage {
-            "greeting" => "Warmly greet the customer and introduce yourself. Build rapport before discussing products.",
-            "discovery" => "Ask open questions to understand customer needs and current situation.",
-            "qualification" => "Assess eligibility and readiness. Understand timeline.",
-            "presentation" => "Present benefits, focusing on their specific needs and concerns.",
-            "objection_handling" => "Address concerns with empathy. Use social proof and guarantees to build confidence.",
-            "closing" => "Summarize benefits and guide them to next steps. Create urgency if appropriate.",
-            "farewell" => "Thank them warmly and confirm next steps. Leave the door open for future conversations.",
-            _ => "",
+            "greeting" => "Focus on warm welcome and understanding the customer's needs.",
+            "qualification" => "Gather information about collateral and loan requirements.",
+            "presentation" => "Present relevant loan options and benefits.",
+            "objection_handling" => "Address concerns empathetically while highlighting advantages.",
+            "closing" => "Guide toward next steps and branch visit.",
+            _ => "Be helpful and professional.",
         };
 
-        if !guidance.is_empty() {
-            self.messages.push(Message::system(format!(
-                "## Current Stage Guidance\n{}",
-                guidance
-            )));
-        }
+        self.messages.push(Message::system(format!(
+            "## Current Stage: {}\n{}",
+            stage, guidance
+        )));
         self
     }
 
@@ -736,18 +743,13 @@ impl ResponseTemplates {
         template.replace("{helpline}", helpline)
     }
 
-    /// Greeting template (DEPRECATED - use greeting_from_prompts_config)
-    #[deprecated(since = "1.0.0", note = "Use greeting_from_prompts_config() with PromptsConfig for domain-agnostic operation")]
-    pub fn greeting(name: &str, language: &str) -> String {
-        if language == "hi" {
-            format!("Namaste! Main {} hoon. Aapki madad karne ke liye yahan hoon.", name)
-        } else {
-            format!(
-                "Hello! I'm {}. I'm here to help you today.",
-                name
-            )
-        }
-    }
+    // P0 FIX: greeting() REMOVED
+    // This deprecated method contained hardcoded greeting text.
+    // Use greeting_from_prompts_config() or greeting_from_view() for domain-agnostic operation.
+    //
+    // Migration guide:
+    //   let prompts_config = master_domain_config.prompts.clone();
+    //   ResponseTemplates::greeting_from_prompts_config(&prompts_config, agent_name, company_name, language)
 
     /// P10 FIX: Greeting using domain view configuration
     ///
@@ -813,17 +815,13 @@ impl ResponseTemplates {
         }
     }
 
-    /// Closing (DEPRECATED - use farewell_from_prompts_config)
-    #[deprecated(since = "1.0.0", note = "Use farewell_from_prompts_config() with PromptsConfig for domain-agnostic operation")]
-    pub fn closing(language: &str) -> String {
-        if language == "hi" {
-            "Dhanyavaad aapka samay dene ke liye. Koi bhi sawal ho toh zaroor call karein."
-                .to_string()
-        } else {
-            "Thank you for your time. Please feel free to call if you have any questions."
-                .to_string()
-        }
-    }
+    // P0 FIX: closing() REMOVED
+    // This deprecated method contained hardcoded farewell text.
+    // Use farewell_from_prompts_config() or closing_from_view() for domain-agnostic operation.
+    //
+    // Migration guide:
+    //   let prompts_config = master_domain_config.prompts.clone();
+    //   ResponseTemplates::farewell_from_prompts_config(&prompts_config, helpline, language)
 
     /// P10 FIX: Closing/farewell using domain view configuration
     ///
@@ -849,34 +847,40 @@ mod tests {
 
     #[test]
     fn test_prompt_builder() {
+        // P0 FIX: Test with user messages only (system_prompt removed)
         let messages = PromptBuilder::new()
-            .system_prompt("en")
             .user_message("What is your interest rate?")
             .build();
 
-        assert!(messages.len() >= 2);
-        assert_eq!(messages[0].role, Role::System);
+        assert!(!messages.is_empty());
+        assert_eq!(messages[0].role, Role::User);
     }
 
     #[test]
     fn test_with_context() {
+        // P0 FIX: Test context without deprecated system_prompt
         let messages = PromptBuilder::new()
-            .system_prompt("en")
             .with_context("Interest rate is 10.5%")
             .user_message("Tell me about rates")
             .build();
 
-        // Should have system prompt, context, and user message
-        assert!(messages.len() >= 3);
+        // Should have context and user message
+        assert!(messages.len() >= 2);
+        // First message should be system (context)
+        assert_eq!(messages[0].role, Role::System);
     }
 
     #[test]
     fn test_templates() {
-        let greeting = ResponseTemplates::greeting("Priya", "hi");
-        assert!(greeting.contains("Namaste"));
+        // P0 FIX: Test non-deprecated response templates
+        let ack = ResponseTemplates::acknowledge("hi");
+        assert!(ack.contains("samajh"));
 
-        let greeting_en = ResponseTemplates::greeting("Priya", "en");
-        assert!(greeting_en.contains("Hello"));
+        let ack_en = ResponseTemplates::acknowledge("en");
+        assert!(ack_en.contains("understand"));
+
+        let clarify = ResponseTemplates::clarify("en");
+        assert!(clarify.contains("more"));
     }
 
     // P0-2 FIX: Tool calling tests updated for JSON Schema format

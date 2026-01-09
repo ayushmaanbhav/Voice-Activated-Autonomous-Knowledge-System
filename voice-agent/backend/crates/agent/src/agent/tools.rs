@@ -94,12 +94,39 @@ impl DomainAgent {
                 }
             }
 
-            // P1 FIX: Use configurable defaults instead of hardcoded values
+            // P16 FIX: Use config-driven tool defaults
+            // First try config-driven defaults, then fall back to hardcoded defaults
+            if let Some(view) = self.domain_view.as_ref() {
+                // Apply argument name mappings from config
+                if let Some(arg_mapping) = view.get_argument_mapping(&name) {
+                    let keys: Vec<String> = args.keys().cloned().collect();
+                    for slot_name in keys {
+                        if let Some(arg_name) = arg_mapping.get(&slot_name) {
+                            if !args.contains_key(arg_name) {
+                                if let Some(value) = args.remove(&slot_name) {
+                                    args.insert(arg_name.clone(), value);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Apply defaults from config
+                if let Some(tool_defaults) = view.get_tool_defaults(&name) {
+                    for (arg_name, default_value) in tool_defaults {
+                        if !args.contains_key(arg_name) {
+                            args.insert(arg_name.clone(), default_value.clone());
+                        }
+                    }
+                }
+            }
+
+            // Legacy fallback: Use hardcoded defaults from config struct if no domain_view
             let defaults = &self.config.tool_defaults;
 
-            if name == "check_eligibility" && !args.contains_key("gold_purity") {
+            if name == "check_eligibility" && !args.contains_key("collateral_variant") && !args.contains_key("gold_purity") {
                 args.insert(
-                    "gold_purity".to_string(),
+                    "collateral_variant".to_string(),
                     serde_json::json!(&defaults.default_gold_purity),
                 );
             }
@@ -125,7 +152,7 @@ impl DomainAgent {
                 }
             }
 
-            if name == "find_branches" && !args.contains_key("city") {
+            if (name == "find_branches" || name == "find_locations") && !args.contains_key("city") {
                 args.insert(
                     "city".to_string(),
                     serde_json::json!(&defaults.default_city),
@@ -290,12 +317,38 @@ impl DomainAgent {
             }
         }
 
-        // Apply defaults based on tool type
+        // P16 FIX: Apply config-driven defaults
+        if let Some(view) = self.domain_view.as_ref() {
+            // Apply argument name mappings from config
+            if let Some(arg_mapping) = view.get_argument_mapping(tool_name) {
+                let keys: Vec<String> = args.keys().cloned().collect();
+                for slot_name in keys {
+                    if let Some(arg_name) = arg_mapping.get(&slot_name) {
+                        if !args.contains_key(arg_name) {
+                            if let Some(value) = args.remove(&slot_name) {
+                                args.insert(arg_name.clone(), value);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Apply defaults from config
+            if let Some(tool_defaults) = view.get_tool_defaults(tool_name) {
+                for (arg_name, default_value) in tool_defaults {
+                    if !args.contains_key(arg_name) {
+                        args.insert(arg_name.clone(), default_value.clone());
+                    }
+                }
+            }
+        }
+
+        // Legacy fallback: Use hardcoded defaults
         let defaults = &self.config.tool_defaults;
 
-        if tool_name == "check_eligibility" && !args.contains_key("gold_purity") {
+        if tool_name == "check_eligibility" && !args.contains_key("collateral_variant") && !args.contains_key("gold_purity") {
             args.insert(
-                "gold_purity".to_string(),
+                "collateral_variant".to_string(),
                 serde_json::json!(&defaults.default_gold_purity),
             );
         }
@@ -321,18 +374,16 @@ impl DomainAgent {
             }
         }
 
-        if tool_name == "find_branches" && !args.contains_key("city") {
+        if (tool_name == "find_branches" || tool_name == "find_locations") && !args.contains_key("city") {
             args.insert(
                 "city".to_string(),
                 serde_json::json!(&defaults.default_city),
             );
         }
 
-        if tool_name == "capture_lead" {
+        if tool_name == "capture_lead" && !args.contains_key("interest_level") {
             // Default interest level to High for proactive capture
-            if !args.contains_key("interest_level") {
-                args.insert("interest_level".to_string(), serde_json::json!("High"));
-            }
+            args.insert("interest_level".to_string(), serde_json::json!("High"));
         }
 
         tracing::debug!(

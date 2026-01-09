@@ -4,9 +4,9 @@
 //! This is domain-agnostic - the actual locations come from domain config.
 
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::sync::RwLock;
+use std::path::{Path, PathBuf};
 
 /// Location/branch data structure for service locations
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,20 +33,45 @@ struct BranchDataFile {
     branches: Vec<BranchData>,
 }
 
+/// Get default paths for location data files.
+/// Checks environment variable first, then falls back to common relative paths.
+fn default_data_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    // Environment variable override (highest priority)
+    if let Ok(data_dir) = std::env::var("VOICE_AGENT_DATA_DIR") {
+        paths.push(PathBuf::from(&data_dir).join("branches.json"));
+    }
+
+    // Config directory from environment
+    if let Ok(config_dir) = std::env::var("VOICE_AGENT_CONFIG_DIR") {
+        paths.push(PathBuf::from(&config_dir).join("data/branches.json"));
+    }
+
+    // Executable-relative path
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            paths.push(exe_dir.join("data/branches.json"));
+        }
+    }
+
+    // Common relative paths (fallback)
+    paths.extend([
+        PathBuf::from("data/branches.json"),
+        PathBuf::from("../data/branches.json"),
+        PathBuf::from("../../data/branches.json"),
+    ]);
+
+    paths
+}
+
 /// Global location data loaded from config/JSON
 /// Note: Locations should be loaded from domain config. This is a runtime cache.
 static BRANCH_DATA: Lazy<RwLock<Vec<BranchData>>> = Lazy::new(|| {
-    // Try to load from default paths
-    let default_paths = [
-        "data/branches.json",
-        "../data/branches.json",
-        "../../data/branches.json",
-        "./branches.json",
-    ];
-
-    for path in &default_paths {
-        if let Ok(data) = load_branches_from_file(path) {
-            tracing::info!("Loaded {} locations from {}", data.len(), path);
+    // Try to load from default paths (env var, exe-relative, then common paths)
+    for path in default_data_paths() {
+        if let Ok(data) = load_branches_from_file(&path) {
+            tracing::info!("Loaded {} locations from {}", data.len(), path.display());
             return RwLock::new(data);
         }
     }
@@ -68,13 +93,13 @@ pub fn load_branches_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<BranchData
 pub fn reload_branches<P: AsRef<Path>>(path: P) -> Result<usize, std::io::Error> {
     let branches = load_branches_from_file(path)?;
     let count = branches.len();
-    *BRANCH_DATA.write().unwrap() = branches;
+    *BRANCH_DATA.write() = branches;
     Ok(count)
 }
 
 /// Get all loaded branches
 pub fn get_branches() -> Vec<BranchData> {
-    BRANCH_DATA.read().unwrap().clone()
+    BRANCH_DATA.read().clone()
 }
 
 /// Initialize locations from config data
@@ -82,7 +107,7 @@ pub fn get_branches() -> Vec<BranchData> {
 /// This should be called during startup to populate locations from domain config.
 pub fn initialize_locations(locations: Vec<BranchData>) {
     let count = locations.len();
-    *BRANCH_DATA.write().unwrap() = locations;
+    *BRANCH_DATA.write() = locations;
     tracing::info!("Initialized {} service locations from config", count);
 }
 

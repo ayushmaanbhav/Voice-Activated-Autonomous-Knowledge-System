@@ -132,6 +132,30 @@ impl Tool for SavingsCalculatorTool {
             calculate_total_interest(loan_amount, current_rate, tenure_months)
                 - calculate_total_interest(loan_amount, our_rate, tenure_months);
 
+        // P16 FIX: Use config-driven response templates
+        let message = if self.view.has_response_templates("calculate_savings") {
+            let mut vars = self.view.default_template_vars();
+            vars.insert("company_name".to_string(), company_name.to_string());
+            vars.insert("rate_tier".to_string(), rate_tier.to_string());
+            vars.insert("our_rate".to_string(), format!("{:.1}", our_rate));
+            vars.insert("emi_savings".to_string(), format!("{:.0}", emi_savings));
+            vars.insert("interest_savings".to_string(), format!("{:.0}", monthly_interest_savings));
+            vars.insert("total_savings".to_string(), format!("{:.0}", total_emi_savings));
+            vars.insert("tenure_months".to_string(), tenure_months.to_string());
+            vars.insert("current_lender".to_string(), current_lender.to_string());
+            vars.insert("rate_reduction".to_string(), format!("{:.1}", current_rate - our_rate));
+            self.view.render_response("calculate_savings", "savings_available", "en", &vars)
+                .unwrap_or_else(|| format!(
+                    "By switching to {} at our {} rate of {}%, you can save ₹{:.0} per month on EMI (or ₹{:.0} on interest-only) and ₹{:.0} total over the remaining {} months!",
+                    company_name, rate_tier, our_rate, emi_savings, monthly_interest_savings, total_emi_savings, tenure_months
+                ))
+        } else {
+            format!(
+                "By switching to {} at our {} rate of {}%, you can save ₹{:.0} per month on EMI (or ₹{:.0} on interest-only) and ₹{:.0} total over the remaining {} months!",
+                company_name, rate_tier, our_rate, emi_savings, monthly_interest_savings, total_emi_savings, tenure_months
+            )
+        };
+
         let result = json!({
             "current_lender": current_lender,
             "current_interest_rate_percent": current_rate,
@@ -148,10 +172,7 @@ impl Tool for SavingsCalculatorTool {
             "tenure_months": tenure_months,
             "rate_tier": rate_tier,
             "company_name": company_name,
-            "message": format!(
-                "By switching to {} at our {} rate of {}%, you can save ₹{:.0} per month on EMI (or ₹{:.0} on interest-only) and ₹{:.0} total over the remaining {} months!",
-                company_name, rate_tier, our_rate, emi_savings, monthly_interest_savings, total_emi_savings, tenure_months
-            )
+            "message": message
         });
 
         Ok(ToolOutput::json(result))

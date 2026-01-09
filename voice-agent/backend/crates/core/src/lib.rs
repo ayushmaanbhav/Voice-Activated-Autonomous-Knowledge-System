@@ -28,6 +28,9 @@ pub mod voice_config;
 // Phase 5: Personalization
 pub mod personalization;
 
+// Financial calculations (single source of truth for EMI, etc.)
+pub mod financial;
+
 // Re-exports from existing modules
 pub use audio::{AudioEncoding, AudioFrame, Channels, SampleRate};
 pub use conversation::{ConversationStage, Turn, TurnRole};

@@ -21,32 +21,35 @@ pub enum CustomerSegment {
 }
 
 impl CustomerSegment {
-    /// Get segment display name
+    /// Get segment display name (generic - override with config for domain-specific names)
     pub fn display_name(&self) -> &'static str {
         match self {
             CustomerSegment::HighValue => "High Value",
             CustomerSegment::TrustSeeker => "Trust Seeker",
             CustomerSegment::FirstTime => "First Time",
             CustomerSegment::PriceSensitive => "Price Sensitive",
-            CustomerSegment::Women => "Women (Shakti)",
+            CustomerSegment::Women => "Women",
             CustomerSegment::Professional => "Young Professional",
         }
     }
 
-    /// Get key messaging points for this segment
+    /// Get generic key messaging points for this segment.
+    ///
+    /// NOTE: For domain-specific messaging, load from config via
+    /// `MasterDomainConfig::segment_messages()` instead of using these defaults.
     pub fn key_messages(&self) -> Vec<&'static str> {
         match self {
             CustomerSegment::HighValue => vec![
                 "Dedicated relationship manager",
                 "Priority processing",
-                "Higher loan limits",
+                "Higher limits",
                 "Exclusive rates",
             ],
             CustomerSegment::TrustSeeker => vec![
-                "RBI-regulated scheduled bank",
-                "Bank-grade security vaults",
+                "Regulated financial institution",
+                "Secure storage facilities",
                 "Full insurance coverage",
-                "Digital tracking of gold",
+                "Digital tracking",
             ],
             CustomerSegment::FirstTime => vec![
                 "Simple process",
@@ -55,15 +58,15 @@ impl CustomerSegment {
                 "Clear documentation",
             ],
             CustomerSegment::PriceSensitive => vec![
-                "Lowest interest rates",
+                "Competitive rates",
                 "Zero foreclosure charges",
                 "Transparent pricing",
                 "Savings calculator",
             ],
             CustomerSegment::Women => vec![
-                "Special Shakti Gold program",
+                "Special programs available",
                 "Preferential rates",
-                "Women-only branches available",
+                "Dedicated service centers",
                 "Flexible repayment",
             ],
             CustomerSegment::Professional => vec![
@@ -146,19 +149,16 @@ pub struct CustomerProfile {
     pub pincode: Option<String>,
 }
 
-// Legacy aliases for backwards compatibility
-impl CustomerProfile {
-    /// Legacy accessor for gold_weight
-    pub fn gold_weight(&self) -> Option<f64> {
-        self.collateral_weight
-    }
+// P0 FIX: Legacy gold aliases REMOVED
+// The following methods have been removed as they violate domain-agnostic principles:
+//   - gold_weight() -> use collateral_weight directly
+//   - gold_purity() -> use collateral_variant directly
+//
+// Code using these aliases should migrate to the generic field names:
+//   profile.gold_weight() -> profile.collateral_weight
+//   profile.gold_purity() -> profile.collateral_variant.as_deref()
 
-    /// Legacy accessor for gold_purity
-    pub fn gold_purity(&self) -> Option<&str> {
-        self.collateral_variant.as_deref()
-    }
 
-}
 
 fn default_language() -> String {
     "en".to_string()
@@ -215,10 +215,8 @@ impl CustomerProfile {
         self
     }
 
-    /// Legacy alias for setting gold details
-    pub fn gold(self, weight: f64, purity: impl Into<String>) -> Self {
-        self.collateral(weight, purity)
-    }
+    // P0 FIX: gold() alias REMOVED
+    // Use collateral(weight, variant) instead of gold(weight, purity)
 
     /// Set preferred language
     pub fn language(mut self, lang: impl Into<String>) -> Self {
@@ -236,73 +234,100 @@ impl CustomerProfile {
         self.collateral_weight.is_some() && self.collateral_variant.is_some()
     }
 
-    /// Legacy alias for has_collateral_details
-    pub fn has_gold_details(&self) -> bool {
-        self.has_collateral_details()
-    }
+    // P0 FIX: has_gold_details() alias REMOVED
+    // Use has_collateral_details() instead
 
-    /// Default asset price per unit (INR). Should be fetched from API/config.
-    pub const DEFAULT_ASSET_PRICE_PER_UNIT: f64 = 7500.0;
+    // P0 FIX: Deprecated constants and methods REMOVED
+    //
+    // The following have been removed as they contained hardcoded domain-specific values:
+    //   - DEFAULT_ASSET_PRICE_PER_UNIT (hardcoded 7500.0)
+    //   - DEFAULT_GOLD_PRICE_PER_GRAM (alias)
+    //   - default_variant_factor() (hardcoded gold purity factors)
+    //
+    // Migration guide:
+    //   - Load asset price from domain config: master_config.constants.asset_price_per_unit
+    //   - Load variant factors from domain config: master_config.constants.variant_factors
+    //   - Use estimated_collateral_value_with_config() with config-provided values
 
-    /// Legacy alias for DEFAULT_ASSET_PRICE_PER_UNIT
-    pub const DEFAULT_GOLD_PRICE_PER_GRAM: f64 = Self::DEFAULT_ASSET_PRICE_PER_UNIT;
-
-    /// Estimate collateral value
+    /// Estimate collateral value using config-provided variant factors.
     ///
-    /// P2 FIX: Now accepts configurable asset_price_per_unit parameter.
-    /// Use `CustomerProfile::DEFAULT_ASSET_PRICE_PER_UNIT` or pass value from config.
-    pub fn estimated_collateral_value(&self, asset_price_per_unit: Option<f64>) -> Option<f64> {
+    /// This is the preferred method - pass variant factors from domain config.
+    ///
+    /// # Arguments
+    /// * `asset_price_per_unit` - Current price per unit from config/API
+    /// * `variant_factors` - Map of variant_id -> factor from config
+    pub fn estimated_collateral_value_with_config(
+        &self,
+        asset_price_per_unit: f64,
+        variant_factors: &std::collections::HashMap<String, f64>,
+    ) -> Option<f64> {
         let weight = self.collateral_weight?;
         let variant = self.collateral_variant.as_ref()?;
 
-        let base_price = asset_price_per_unit.unwrap_or(Self::DEFAULT_ASSET_PRICE_PER_UNIT);
+        let variant_upper = variant.to_uppercase();
+        let variant_factor = variant_factors
+            .get(&variant_upper)
+            .or_else(|| variant_factors.get(variant))
+            .copied()
+            .unwrap_or(0.75); // Default to conservative factor
 
-        // Variant factors - these should ideally come from config
-        let variant_factor = match variant.to_uppercase().as_str() {
-            "24K" | "HIGH_GRADE" => 1.0,
-            "22K" | "STANDARD_GRADE" => 0.916,
-            "18K" | "LOWER_GRADE" => 0.75,
-            "14K" => 0.585,
-            _ => 0.75, // Default to lower grade
-        };
-
-        Some(weight * base_price * variant_factor)
+        Some(weight * asset_price_per_unit * variant_factor)
     }
 
-    /// Legacy alias for estimated_collateral_value
-    pub fn estimated_gold_value(&self, gold_price_per_gram: Option<f64>) -> Option<f64> {
-        self.estimated_collateral_value(gold_price_per_gram)
-    }
+    // P0 FIX: Deprecated estimation methods REMOVED
+    //
+    // The following have been removed as they used hardcoded fallback values:
+    //   - estimated_collateral_value() - used hardcoded price and factors
+    //   - estimated_gold_value() - alias for above
+    //
+    // Use estimated_collateral_value_with_config() with values from domain config:
+    //   let price = master_config.constants.asset_price_per_unit;
+    //   let factors = master_config.constants.variant_factors;
+    //   profile.estimated_collateral_value_with_config(price, &factors)
 
     /// Get display name (name or "Customer")
     pub fn display_name(&self) -> &str {
         self.name.as_deref().unwrap_or("Customer")
     }
 
-    /// Infer segment from profile data
-    pub fn infer_segment(&self) -> Option<CustomerSegment> {
+    /// P16 FIX: Infer segment from profile data with config-driven thresholds
+    ///
+    /// # Arguments
+    /// * `collateral_threshold` - Minimum collateral weight for high value (e.g., 100.0)
+    /// * `amount_threshold` - Minimum loan amount for high value (e.g., 500_000.0)
+    ///
+    /// Use this method with values from segments.yaml:
+    /// ```ignore
+    /// let thresholds = segments_config.get_high_value_thresholds();
+    /// profile.infer_segment_with_thresholds(
+    ///     thresholds.collateral_min,
+    ///     thresholds.loan_amount_min
+    /// )
+    /// ```
+    pub fn infer_segment_with_thresholds(
+        &self,
+        collateral_threshold: f64,
+        amount_threshold: f64,
+    ) -> Option<CustomerSegment> {
         // Already has segment
         if self.segment.is_some() {
             return self.segment;
         }
 
-        // High value: >100 units collateral OR loan amount > 5 lakhs
+        // High value: collateral OR loan amount above configured thresholds
         if let Some(weight) = self.collateral_weight {
-            if weight >= 100.0 {
+            if weight >= collateral_threshold {
                 return Some(CustomerSegment::HighValue);
             }
         }
         if let Some(amount) = self.loan_amount {
-            if amount >= 500_000.0 {
+            if amount >= amount_threshold {
                 return Some(CustomerSegment::HighValue);
             }
         }
 
-        // Trust seeker: switching from NBFC due to issues
-        // Note: For config-driven competitor detection, use primary_segment_with_config()
+        // Trust seeker: has current lender
         if self.current_lender.is_some() {
-            // Having any current lender suggests potential for TrustSeeker segment
-            // Full competitor matching done via primary_segment_with_config()
             return Some(CustomerSegment::TrustSeeker);
         }
 
@@ -312,6 +337,18 @@ impl CustomerProfile {
         }
 
         None
+    }
+
+    /// Infer segment from profile data (legacy, uses hardcoded fallback thresholds)
+    ///
+    /// DEPRECATED: Use `infer_segment_with_thresholds()` for config-driven detection.
+    /// These hardcoded values are fallbacks from segments.yaml high_value.detection.numeric_thresholds.
+    pub fn infer_segment(&self) -> Option<CustomerSegment> {
+        // Legacy fallback thresholds (should match segments.yaml defaults)
+        const DEFAULT_COLLATERAL_THRESHOLD: f64 = 100.0;  // grams
+        const DEFAULT_AMOUNT_THRESHOLD: f64 = 500_000.0;  // INR (5 lakhs)
+
+        self.infer_segment_with_thresholds(DEFAULT_COLLATERAL_THRESHOLD, DEFAULT_AMOUNT_THRESHOLD)
     }
 }
 
@@ -323,36 +360,62 @@ impl CustomerProfile {
 /// - Price/rate focus → Price Sensitive
 /// - Safety concerns → Trust Seeker
 /// - Comparison mentions → Price Sensitive
+///
+/// NOTE: For full config-driven detection, use with patterns loaded from domain config.
 #[derive(Debug, Clone)]
 pub struct SegmentDetector {
-    /// Weight for high-value detection (default: 100g)
-    pub high_value_gold_threshold: f64,
-    /// Amount for high-value detection (default: 5 lakhs)
+    /// Collateral quantity threshold for high-value detection (domain-specific unit)
+    pub high_value_collateral_threshold: f64,
+    /// Amount threshold for high-value detection (currency-specific)
     pub high_value_amount_threshold: f64,
+    /// Optional custom collateral weight patterns from config
+    pub collateral_weight_patterns: Vec<String>,
 }
 
 impl Default for SegmentDetector {
     fn default() -> Self {
         Self {
-            high_value_gold_threshold: 100.0,
+            high_value_collateral_threshold: 100.0,
             high_value_amount_threshold: 500_000.0,
+            collateral_weight_patterns: Vec::new(),
         }
     }
 }
 
 impl SegmentDetector {
-    /// Create a new segment detector
+    /// Create a new segment detector with default thresholds
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Create with custom thresholds
-    pub fn with_thresholds(gold_grams: f64, amount_inr: f64) -> Self {
+    /// Create with custom thresholds from domain config
+    ///
+    /// # Arguments
+    /// * `collateral_threshold` - Collateral quantity threshold (e.g., 100 for 100g gold)
+    /// * `amount_threshold` - Loan amount threshold (e.g., 500000 for 5 lakh INR)
+    pub fn with_thresholds(collateral_threshold: f64, amount_threshold: f64) -> Self {
         Self {
-            high_value_gold_threshold: gold_grams,
-            high_value_amount_threshold: amount_inr,
+            high_value_collateral_threshold: collateral_threshold,
+            high_value_amount_threshold: amount_threshold,
+            collateral_weight_patterns: Vec::new(),
         }
     }
+
+    /// Create with thresholds and custom collateral patterns from config
+    pub fn with_config(
+        collateral_threshold: f64,
+        amount_threshold: f64,
+        collateral_patterns: Vec<String>,
+    ) -> Self {
+        Self {
+            high_value_collateral_threshold: collateral_threshold,
+            high_value_amount_threshold: amount_threshold,
+            collateral_weight_patterns: collateral_patterns,
+        }
+    }
+
+    // P0 FIX: with_gold_thresholds() alias REMOVED
+    // Use with_thresholds(collateral_threshold, amount_threshold) instead
 
     /// Detect segment from text content (conversation transcript)
     pub fn detect_from_text(&self, text: &str) -> Option<CustomerSegment> {
@@ -383,8 +446,7 @@ impl SegmentDetector {
 
     /// Detect high-value customer from text
     fn detect_high_value_amount(&self, text: &str) -> bool {
-        // Hindi: lakh, crore
-        // Look for amounts like "5 lakh", "10 lakh", "1 crore"
+        // Generic currency patterns (lakh/crore are common in South Asian currencies)
         let high_value_patterns = [
             "lakh",
             "lakhs",
@@ -414,11 +476,21 @@ impl SegmentDetector {
             }
         }
 
-        // Check for large gold weights
-        let gold_patterns = ["100 gram", "150 gram", "200 gram", "सौ ग्राम"];
-        for pattern in &gold_patterns {
-            if text.contains(pattern) {
+        // Check for collateral weight patterns from config
+        for pattern in &self.collateral_weight_patterns {
+            if text.contains(&pattern.to_lowercase()) {
                 return true;
+            }
+        }
+
+        // Default collateral patterns (can be overridden by config)
+        // These are generic weight-based patterns
+        if self.collateral_weight_patterns.is_empty() {
+            let default_weight_patterns = ["100 gram", "150 gram", "200 gram"];
+            for pattern in &default_weight_patterns {
+                if text.contains(*pattern) {
+                    return true;
+                }
             }
         }
 
@@ -495,10 +567,13 @@ impl SegmentDetector {
     }
 
     /// Detect trust-seeking customer (basic patterns only, no competitor matching)
+    ///
+    /// NOTE: For domain-specific patterns (e.g., "gold safe"), load from config via
+    /// `detect_trust_seeking_with_config()` and pass domain-specific patterns.
     fn detect_trust_seeking(&self, text: &str) -> bool {
         let trust_patterns = [
-            // Safety concerns
-            "gold safe",
+            // Generic safety concerns (domain-agnostic)
+            "is it safe",
             "safe hai",
             "surakshit",
             "insurance",
@@ -507,15 +582,18 @@ impl SegmentDetector {
             "rbi",
             "regulated",
             "government",
-            // Past issues
+            "secure",
+            "security",
+            // Past issues (domain-agnostic)
             "problem",
             "issue",
             "fraud",
             "cheat",
-            "lost gold",
-            "gold missing",
-            // Hindi
-            "सोना सुरक्षित",
+            "lost",
+            "missing",
+            "stolen",
+            // Hindi (generic trust terms)
+            "सुरक्षित",
             "भरोसा",
             "विश्वास",
         ];
@@ -641,28 +719,35 @@ impl CompanyRelationship {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_customer_profile() {
+        // P0 FIX: Use generic collateral() method instead of gold()
         let profile = CustomerProfile::with_phone("9876543210")
             .name("Raj Kumar")
-            .current_lender("Muthoot Finance")
-            .gold(50.0, "22K")
+            .current_lender("Provider A")
+            .collateral(50.0, "STANDARD_GRADE")
             .language("hi");
 
         assert!(profile.is_switcher());
-        assert!(profile.has_gold_details());
-        assert!(profile.estimated_gold_value(None).is_some());
+        assert!(profile.has_collateral_details());
+
+        // P0 FIX: Use config-driven value estimation
+        let mut variant_factors = HashMap::new();
+        variant_factors.insert("STANDARD_GRADE".to_string(), 0.916);
+        let value = profile.estimated_collateral_value_with_config(7500.0, &variant_factors);
+        assert!(value.is_some());
     }
 
     #[test]
     fn test_segment_inference() {
-        // High value
-        let profile = CustomerProfile::new().gold(150.0, "22K");
+        // High value - use collateral() instead of gold()
+        let profile = CustomerProfile::new().collateral(150.0, "HIGH_GRADE");
         assert_eq!(profile.infer_segment(), Some(CustomerSegment::HighValue));
 
-        // Trust seeker (IIFL customer)
-        let profile = CustomerProfile::new().current_lender("IIFL Finance");
+        // Trust seeker (customer with current provider)
+        let profile = CustomerProfile::new().current_lender("Provider A");
         assert_eq!(profile.infer_segment(), Some(CustomerSegment::TrustSeeker));
 
         // First time
@@ -773,16 +858,17 @@ mod tests {
     fn test_segment_detector_combined() {
         let detector = SegmentDetector::new();
 
+        // P0 FIX: Use collateral() instead of gold()
         // Profile takes precedence
-        let profile = CustomerProfile::new().gold(150.0, "22K");
+        let profile = CustomerProfile::new().collateral(150.0, "HIGH_GRADE");
         assert_eq!(
             detector.detect_combined(&profile, Some("what is your rate")),
             Some(CustomerSegment::HighValue)
         );
 
         // Falls back to text when profile doesn't determine segment
-        // (profile with gold details but not enough to be high value)
-        let profile = CustomerProfile::new().gold(20.0, "22K");
+        // (profile with collateral details but not enough to be high value)
+        let profile = CustomerProfile::new().collateral(20.0, "STANDARD_GRADE");
         assert_eq!(
             detector.detect_combined(&profile, Some("what is your interest rate")),
             Some(CustomerSegment::PriceSensitive)

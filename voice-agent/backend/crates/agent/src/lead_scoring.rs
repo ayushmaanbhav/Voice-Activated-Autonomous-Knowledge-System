@@ -107,7 +107,7 @@ pub struct LeadSignals {
 
     // Information provided
     pub provided_contact_info: bool,
-    pub provided_gold_details: bool,
+    pub provided_asset_details: bool,
     pub provided_loan_amount: bool,
     pub has_specific_requirements: bool,
 
@@ -296,7 +296,8 @@ impl LeadScoringEngine {
         match intent {
             "loan_inquiry" | "eligibility_query" => {
                 self.signals.engagement_turns += 1;
-                if slots.contains_key("loan_amount") {
+                // P16 FIX: Accept both domain-specific and generic slot names
+                if slots.contains_key("loan_amount") || slots.contains_key("offer_amount") || slots.contains_key("requested_amount") {
                     self.signals.provided_loan_amount = true;
                     self.signals.has_specific_requirements = true;
                 }
@@ -339,11 +340,15 @@ impl LeadScoringEngine {
         }
 
         // Check slots for additional signals
-        if slots.contains_key("phone_number") || slots.contains_key("customer_name") {
+        if slots.contains_key("phone_number") || slots.contains_key("customer_name") || slots.contains_key("phone") {
             self.signals.provided_contact_info = true;
         }
-        if slots.contains_key("gold_weight") || slots.contains_key("gold_purity") {
-            self.signals.provided_gold_details = true;
+        // P16 FIX: Accept both domain-specific and generic slot names
+        // Domain-specific: gold_weight, gold_purity (gold loan)
+        // Generic: asset_quantity, asset_quality (from slots.yaml aliases)
+        if slots.contains_key("gold_weight") || slots.contains_key("gold_purity")
+            || slots.contains_key("asset_quantity") || slots.contains_key("asset_quality") {
+            self.signals.provided_asset_details = true;
         }
     }
 
@@ -456,7 +461,7 @@ impl LeadScoringEngine {
             if signals.provided_contact_info {
                 score += 8;
             }
-            if signals.provided_gold_details {
+            if signals.provided_asset_details {
                 score += 8;
             }
             if signals.provided_loan_amount {
@@ -732,7 +737,7 @@ mod tests {
         engine.signals_mut().provided_contact_info = true;
         engine.signals_mut().has_specific_requirements = true;
         engine.signals_mut().provided_loan_amount = true;
-        engine.signals_mut().provided_gold_details = true;
+        engine.signals_mut().provided_asset_details = true;
         engine.signals_mut().expressed_intent_to_proceed = true;
         engine.signals_mut().requested_branch_visit = true;
         engine.signals_mut().engagement_turns = 5;

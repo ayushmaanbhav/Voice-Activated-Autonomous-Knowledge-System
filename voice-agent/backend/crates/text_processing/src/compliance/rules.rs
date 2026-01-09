@@ -91,6 +91,27 @@ pub struct CompetitorRules {
     pub allow_comparison: bool,
 }
 
+impl CompetitorRules {
+    /// P16 FIX: Create from config-provided competitor names
+    ///
+    /// Use this with CompetitorsConfig::all_names_and_aliases():
+    /// ```ignore
+    /// let config = CompetitorsConfig::load("competitors.yaml")?;
+    /// let rules = CompetitorRules::from_names(config.all_names_and_aliases());
+    /// ```
+    pub fn from_names<I, S>(competitors: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            competitors: competitors.into_iter().map(|s| s.into()).collect(),
+            allow_disparagement: false,
+            allow_comparison: true,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -158,11 +179,18 @@ pub fn default_rules() -> ComplianceRules {
                 position: "end".to_string(),
             },
         ],
+        // P16 FIX: These are FALLBACK defaults for gold loan domain
+        // For production, load competitors from CompetitorsConfig:
+        //   let config = CompetitorsConfig::load("config/domains/gold_loan/competitors.yaml")?;
+        //   let competitors = config.all_names_and_aliases().iter().map(|s| s.to_string()).collect();
+        //   CompetitorRules { competitors, allow_disparagement: false, allow_comparison: true }
         competitor_rules: CompetitorRules {
             competitors: vec![
+                // Gold loan NBFCs (fallback defaults)
                 "Muthoot".to_string(),
                 "Manappuram".to_string(),
                 "IIFL".to_string(),
+                // Banks (fallback defaults)
                 "HDFC".to_string(),
                 "SBI".to_string(),
                 "ICICI".to_string(),

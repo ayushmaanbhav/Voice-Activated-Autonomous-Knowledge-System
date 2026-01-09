@@ -1,0 +1,152 @@
+# Entity Type Mappings Configuration
+# P16 FIX: Config-driven entity type definitions
+#
+# Maps generic entity types to domain-specific display names and categories.
+# Enables domain-agnostic entity extraction with localized presentation.
+
+# Entity type definitions
+entity_types:
+  # Asset-related entities
+  asset_quantity:
+    display_name: "Gold Weight"
+    display_name_hi: "सोने का वजन"
+    category: "Asset"
+    unit: "grams"
+    unit_hi: "ग्राम"
+    description: "Quantity/weight of the collateral asset"
+    aliases:
+      - gold_weight
+      - gold_weight_grams
+      - weight
+      - collateral_weight
+
+  asset_quality:
+    display_name: "Gold Purity"
+    display_name_hi: "सोने की शुद्धता"
+    category: "Asset"
+    description: "Quality grade/purity of the collateral asset"
+    aliases:
+      - gold_purity
+      - purity
+      - karat
+      - collateral_variant
+
+  asset_type:
+    display_name: "Gold Item Type"
+    display_name_hi: "सोने की वस्तु का प्रकार"
+    category: "Asset"
+    description: "Type/category of collateral item"
+    aliases:
+      - gold_item_type
+      - item_type
+      - collateral_type
+
+  # Financial entities
+  offer_amount:
+    display_name: "Loan Amount"
+    display_name_hi: "ऋण राशि"
+    category: "Financial"
+    currency: "INR"
+    description: "Requested or offered loan amount"
+    aliases:
+      - loan_amount
+      - amount
+      - requested_amount
+      - principal
+
+  interest_rate:
+    display_name: "Interest Rate"
+    display_name_hi: "ब्याज दर"
+    category: "Financial"
+    unit: "percent"
+    description: "Annual interest rate percentage"
+    aliases:
+      - rate
+      - current_interest_rate
+
+  tenure:
+    display_name: "Loan Tenure"
+    display_name_hi: "ऋण अवधि"
+    category: "Financial"
+    unit: "months"
+    description: "Duration of the loan"
+    aliases:
+      - loan_tenure
+      - duration
+      - period
+
+  # Provider entities
+  current_provider:
+    display_name: "Current Lender"
+    display_name_hi: "वर्तमान ऋणदाता"
+    category: "Provider"
+    description: "Customer's current loan provider"
+    aliases:
+      - current_lender
+      - lender
+      - existing_lender
+
+  # Customer entities
+  customer_name:
+    display_name: "Customer Name"
+    display_name_hi: "ग्राहक का नाम"
+    category: "Customer"
+    description: "Full name of the customer"
+    aliases:
+      - name
+      - full_name
+
+  phone:
+    display_name: "Phone Number"
+    display_name_hi: "फोन नंबर"
+    category: "Customer"
+    description: "Customer contact number"
+    aliases:
+      - phone_number
+      - mobile
+      - contact_number
+
+  location:
+    display_name: "Location"
+    display_name_hi: "स्थान"
+    category: "Customer"
+    description: "Customer city or area"
+    aliases:
+      - city
+      - area
+      - address
+
+# Entity categories with descriptions
+categories:
+  Asset:
+    description: "Entities related to collateral assets"
+    icon: "gold"
+  Financial:
+    description: "Monetary and rate-related entities"
+    icon: "currency"
+  Provider:
+    description: "Loan provider related entities"
+    icon: "bank"
+  Customer:
+    description: "Customer information entities"
+    icon: "person"
+
+# Extraction priority (higher = extracted first)
+extraction_priority:
+  - phone  # Phone numbers first (most reliable pattern)
+  - asset_quantity
+  - offer_amount
+  - interest_rate
+  - tenure
+  - asset_quality
+  - current_provider
+  - customer_name
+  - location
+  - asset_type
+
+# Display format templates
+display_formats:
+  asset_quantity: "{value} {unit}"
+  offer_amount: "{currency}{value}"
+  interest_rate: "{value}%"
+  tenure: "{value} {unit}"

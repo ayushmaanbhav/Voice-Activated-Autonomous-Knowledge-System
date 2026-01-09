@@ -48,15 +48,22 @@ impl Default for ExtractiveCompressorConfig {
             recency_decay: 0.92,
             max_tokens: 800,
             include_dst_summary: true,
+            // P16 FIX: Support both domain-specific and generic slot names
             priority_entities: vec![
+                // Generic slot names (domain-agnostic)
+                "asset_quantity".to_string(),
+                "asset_quality".to_string(),
+                "amount".to_string(),
+                "customer_name".to_string(),
+                "phone_number".to_string(),
+                "competitor".to_string(),
+                "interest_rate".to_string(),
+                "preferred_branch".to_string(),
+                // Domain-specific aliases (gold loan)
                 "gold_weight".to_string(),
                 "loan_amount".to_string(),
                 "gold_purity".to_string(),
-                "customer_name".to_string(),
-                "phone_number".to_string(),
                 "current_lender".to_string(),
-                "interest_rate".to_string(),
-                "preferred_branch".to_string(),
             ],
         }
     }
@@ -149,19 +156,24 @@ impl ExtractiveCompressor {
             domain_keywords.insert(kw.to_string());
         }
 
+        // P16 FIX: Entity patterns use generic names, with domain-specific aliases
         let mut entity_patterns = HashMap::new();
+        // Generic: asset_quantity (gold_weight is a domain alias)
         entity_patterns.insert(
-            "gold_weight".to_string(),
+            "asset_quantity".to_string(),
             vec!["gram".to_string(), "grams".to_string(), "gm".to_string(), "tola".to_string()],
         );
+        // Generic: amount (loan_amount is a domain alias)
         entity_patterns.insert(
-            "loan_amount".to_string(),
+            "amount".to_string(),
             vec!["lakh".to_string(), "crore".to_string(), "rupees".to_string(), "rs".to_string()],
         );
+        // Generic: asset_quality (gold_purity is a domain alias)
         entity_patterns.insert(
-            "gold_purity".to_string(),
+            "asset_quality".to_string(),
             vec!["22k".to_string(), "24k".to_string(), "18k".to_string(), "karat".to_string()],
         );
+        // Generic: competitor (current_lender is a domain alias)
         entity_patterns.insert(
             "competitor".to_string(),
             vec!["muthoot".to_string(), "manappuram".to_string(), "iifl".to_string(), "hdfc".to_string(), "sbi".to_string()],
@@ -473,17 +485,19 @@ impl ExtractiveCompressor {
                 .iter()
                 .filter(|(_, v)| !v.is_empty())
                 .map(|(k, v)| {
+                    // P16 FIX: Support both generic and domain-specific slot names
                     let display_key = match k.as_str() {
-                        "gold_weight" | "weight" => "Gold",
-                        "loan_amount" | "amount" => "Amount",
-                        "gold_purity" | "purity" => "Purity",
+                        // Generic names first, then domain-specific aliases
+                        "asset_quantity" | "gold_weight" | "weight" => "Asset",
+                        "amount" | "loan_amount" => "Amount",
+                        "asset_quality" | "gold_purity" | "purity" => "Quality",
                         "customer_name" | "name" => "Name",
                         "phone_number" | "phone" => "Phone",
-                        "current_lender" | "competitor" => "Lender",
+                        "competitor" | "current_lender" => "Competitor",
                         "interest_rate" | "rate" => "Rate",
                         "preferred_branch" | "branch" => "Branch",
                         "urgency" => "Urgency",
-                        "loan_purpose" => "Purpose",
+                        "purpose" | "loan_purpose" => "Purpose",
                         _ => k.as_str(),
                     };
                     format!("{}={}", display_key, v)

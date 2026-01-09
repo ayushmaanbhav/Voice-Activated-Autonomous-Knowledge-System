@@ -90,6 +90,37 @@ pub enum ConversationStage {
 }
 
 impl ConversationStage {
+    /// P16 FIX: Get stage ID as string (for config lookups)
+    ///
+    /// Returns the lowercase snake_case ID matching config keys.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ConversationStage::Greeting => "greeting",
+            ConversationStage::Discovery => "discovery",
+            ConversationStage::Qualification => "qualification",
+            ConversationStage::Presentation => "presentation",
+            ConversationStage::ObjectionHandling => "objection_handling",
+            ConversationStage::Closing => "closing",
+            ConversationStage::Farewell => "farewell",
+        }
+    }
+
+    /// P16 FIX: Parse stage from config string
+    ///
+    /// Accepts lowercase snake_case IDs from config.
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "greeting" => Some(ConversationStage::Greeting),
+            "discovery" => Some(ConversationStage::Discovery),
+            "qualification" => Some(ConversationStage::Qualification),
+            "presentation" => Some(ConversationStage::Presentation),
+            "objection_handling" => Some(ConversationStage::ObjectionHandling),
+            "closing" => Some(ConversationStage::Closing),
+            "farewell" => Some(ConversationStage::Farewell),
+            _ => None,
+        }
+    }
+
     /// Get stage display name
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -320,7 +351,40 @@ impl StageManager {
         }
     }
 
+    /// P16 FIX: Create a stage manager with requirements loaded from config
+    ///
+    /// Loads stage requirements from the provided StagesConfig, falling back
+    /// to defaults for any stages not defined in config.
+    pub fn from_config(config: &voice_agent_config::domain::StagesConfig) -> Self {
+        let mut requirements = Self::default_requirements();
+
+        // Override with config values
+        for (stage_id, stage_def) in &config.stages {
+            if let Some(stage) = ConversationStage::from_str(stage_id) {
+                requirements.insert(
+                    stage,
+                    StageRequirements {
+                        min_turns: stage_def.requirements.min_turns,
+                        required_info: stage_def.requirements.required_info.clone(),
+                        required_intents: stage_def.requirements.required_intents.clone(),
+                    },
+                );
+            }
+        }
+
+        Self {
+            current_stage: Mutex::new(ConversationStage::Greeting),
+            stage_history: Mutex::new(Vec::new()),
+            stage_turns: Mutex::new(HashMap::new()),
+            collected_info: Mutex::new(HashMap::new()),
+            detected_intents: Mutex::new(Vec::new()),
+            requirements,
+        }
+    }
+
     /// Get default stage requirements
+    ///
+    /// P16 FIX: Use generic slot names with domain-specific aliases
     fn default_requirements() -> HashMap<ConversationStage, StageRequirements> {
         let mut req = HashMap::new();
 
@@ -337,7 +401,8 @@ impl StageManager {
             ConversationStage::Discovery,
             StageRequirements {
                 min_turns: 2,
-                required_info: vec!["current_lender".into()],
+                // P16 FIX: Generic name (competitor) with domain alias (current_lender)
+                required_info: vec!["competitor".into()],
                 required_intents: vec![],
             },
         );
@@ -346,7 +411,8 @@ impl StageManager {
             ConversationStage::Qualification,
             StageRequirements {
                 min_turns: 1,
-                required_info: vec!["gold_weight".into()],
+                // P16 FIX: Generic name (asset_quantity) with domain alias (gold_weight)
+                required_info: vec!["asset_quantity".into()],
                 required_intents: vec![],
             },
         );
@@ -365,7 +431,7 @@ impl StageManager {
             StageRequirements {
                 min_turns: 1,
                 required_info: vec![],
-                required_intents: vec!["objection_raised".into()],
+                required_intents: vec!["objection".into()],
             },
         );
 
@@ -428,6 +494,7 @@ impl StageManager {
     /// Check if current stage requirements are met
     ///
     /// P0 FIX: Now validates required_intents in addition to min_turns and required_info.
+    /// P16 FIX: Accepts both generic and domain-specific slot names.
     pub fn stage_completed(&self) -> bool {
         let stage = self.current();
         let turns = self.stage_turns.lock();
@@ -441,9 +508,9 @@ impl StageManager {
                 return false;
             }
 
-            // Check required info
+            // Check required info (P16 FIX: check aliases too)
             for key in &req.required_info {
-                if !info.contains_key(key) {
+                if !self.has_info_or_alias(&info, key) {
                     return false;
                 }
             }
@@ -464,6 +531,31 @@ impl StageManager {
         } else {
             true // No requirements, always completed
         }
+    }
+
+    /// P16 FIX: Check if info contains key or any of its aliases
+    fn has_info_or_alias(&self, info: &HashMap<String, String>, key: &str) -> bool {
+        // Check direct key
+        if info.contains_key(key) {
+            return true;
+        }
+
+        // Check known aliases (generic ↔ domain-specific mappings)
+        let aliases: &[&str] = match key {
+            // Generic → domain-specific
+            "asset_quantity" => &["gold_weight", "gold_weight_grams", "weight"],
+            "asset_quality" => &["gold_purity", "purity", "karat"],
+            "competitor" => &["current_lender", "other_bank"],
+            "amount" => &["loan_amount", "requested_amount"],
+            // Domain-specific → generic
+            "gold_weight" | "gold_weight_grams" => &["asset_quantity"],
+            "gold_purity" | "purity" => &["asset_quality"],
+            "current_lender" => &["competitor"],
+            "loan_amount" => &["amount"],
+            _ => &[],
+        };
+
+        aliases.iter().any(|alias| info.contains_key(*alias))
     }
 
     /// Transition to a new stage

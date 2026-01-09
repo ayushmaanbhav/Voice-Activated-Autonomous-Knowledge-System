@@ -39,6 +39,12 @@ pub struct ScoringConfig {
     /// Conversion probability multipliers
     #[serde(default)]
     pub conversion_multipliers: ConversionMultipliers,
+    /// P16 FIX: Intent to signal mappings (domain-agnostic)
+    #[serde(default)]
+    pub intent_signal_mappings: HashMap<String, IntentSignalMapping>,
+    /// P16 FIX: Slot to signal mappings (domain-agnostic)
+    #[serde(default)]
+    pub slot_signal_mappings: HashMap<String, SlotSignalMapping>,
 }
 
 impl Default for ScoringConfig {
@@ -54,6 +60,8 @@ impl Default for ScoringConfig {
             intent: IntentScoringConfig::default(),
             penalties: PenaltyConfig::default(),
             conversion_multipliers: ConversionMultipliers::default(),
+            intent_signal_mappings: HashMap::new(),
+            slot_signal_mappings: HashMap::new(),
         }
     }
 }
@@ -99,6 +107,25 @@ impl ScoringConfig {
             "high" => self.trust_scores.high,
             _ => self.trust_scores.unknown,
         }
+    }
+
+    /// P16 FIX: Get signal mapping for an intent
+    pub fn get_intent_signals(&self, intent: &str) -> Option<&IntentSignalMapping> {
+        self.intent_signal_mappings.get(intent)
+    }
+
+    /// P16 FIX: Get signal for a slot
+    pub fn get_slot_signal(&self, slot: &str) -> Option<&str> {
+        self.slot_signal_mappings.get(slot).map(|m| m.signal.as_str())
+    }
+
+    /// P16 FIX: Get all urgency keywords (all languages combined)
+    pub fn all_urgency_keywords(&self) -> Vec<&str> {
+        self.urgency
+            .keywords
+            .values()
+            .flat_map(|v| v.iter().map(|s| s.as_str()))
+            .collect()
     }
 }
 
@@ -337,6 +364,43 @@ impl Default for ConversionMultipliers {
             max_probability: 0.95,
         }
     }
+}
+
+// =============================================================================
+// P16 FIX: Signal Mapping Types (Domain-Agnostic)
+// =============================================================================
+
+/// P16 FIX: Intent to signal mapping
+///
+/// Maps a detected intent to the signals that should be updated.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IntentSignalMapping {
+    /// Signals to set/increment when this intent is detected
+    #[serde(default)]
+    pub signals: Vec<String>,
+    /// Optional slot checks - if specific slots are present, set additional signals
+    #[serde(default)]
+    pub slot_checks: Vec<SlotCheck>,
+}
+
+/// P16 FIX: Slot check within intent mapping
+///
+/// If any of the specified slots are present, set the specified signals.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlotCheck {
+    /// Slot names to check for (any match triggers)
+    pub slots: Vec<String>,
+    /// Signals to set if any slot is present
+    pub signals: Vec<String>,
+}
+
+/// P16 FIX: Slot to signal mapping
+///
+/// Maps a slot name to the signal that should be set when the slot is present.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlotSignalMapping {
+    /// Signal to set when this slot is present
+    pub signal: String,
 }
 
 /// Errors when loading scoring configuration

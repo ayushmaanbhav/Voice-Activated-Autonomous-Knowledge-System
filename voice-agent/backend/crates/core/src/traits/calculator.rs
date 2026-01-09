@@ -259,18 +259,8 @@ impl ConfigDrivenCalculator {
 
 impl DomainCalculator for ConfigDrivenCalculator {
     fn calculate_emi(&self, principal: f64, annual_rate: f64, tenure_months: i64) -> f64 {
-        // EXACT FORMULA preserved from tools/src/gold_loan/utils.rs
-        let monthly_rate = annual_rate / 100.0 / 12.0;
-
-        // Edge case: zero or negative rate
-        if monthly_rate <= 0.0 {
-            return principal / tenure_months as f64;
-        }
-
-        let n = tenure_months as i32;
-        let factor = (1.0 + monthly_rate).powi(n);
-
-        principal * monthly_rate * factor / (factor - 1.0)
+        // Use shared financial calculation from crate::financial
+        crate::financial::calculate_emi(principal, annual_rate, tenure_months)
     }
 
     fn calculate_total_interest(
@@ -279,9 +269,8 @@ impl DomainCalculator for ConfigDrivenCalculator {
         annual_rate: f64,
         tenure_months: i64,
     ) -> f64 {
-        // EXACT FORMULA: Total Interest = (EMI × n) - Principal
-        let emi = self.calculate_emi(principal, annual_rate, tenure_months);
-        (emi * tenure_months as f64) - principal
+        // Use shared financial calculation from crate::financial
+        crate::financial::calculate_total_interest(principal, annual_rate, tenure_months)
     }
 
     fn calculate_asset_value(

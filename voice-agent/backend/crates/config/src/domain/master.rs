@@ -22,6 +22,7 @@ use super::segments::SegmentsConfig;
 use super::slots::SlotsConfig;
 use super::sms_templates::SmsTemplatesConfig;
 use super::stages::StagesConfig;
+use super::tool_responses::ToolResponsesConfig;
 use super::tools::ToolsConfig;
 
 /// Brand configuration - domain-agnostic
@@ -382,6 +383,9 @@ pub struct MasterDomainConfig {
     /// P16 FIX: Document requirements (loaded from tools/documents.yaml)
     #[serde(skip)]
     pub documents: DocumentsConfig,
+    /// P16 FIX: Tool response templates (loaded from tools/responses.yaml)
+    #[serde(skip)]
+    pub tool_responses: ToolResponsesConfig,
     /// Raw JSON for dynamic access
     #[serde(skip)]
     raw_config: Option<JsonValue>,
@@ -422,6 +426,7 @@ impl Default for MasterDomainConfig {
             goals: GoalsConfig::default(),
             features: FeaturesConfig::default(),
             documents: DocumentsConfig::default(),
+            tool_responses: ToolResponsesConfig::default(),
             raw_config: None,
         }
     }
@@ -549,6 +554,43 @@ impl MasterDomainConfig {
             }
         } else {
             tracing::debug!("No tools config found at {:?}", tools_path);
+        }
+
+        // 8b. P16 FIX: Load intent-to-tool mappings (optional, merges into tools config)
+        let mappings_path = config_dir.join(format!("domains/{}/intent_tool_mappings.yaml", domain_id));
+        if mappings_path.exists() {
+            match super::tools::IntentToolMappingsConfig::load(&mappings_path) {
+                Ok(mappings) => {
+                    // Expand aliases and merge into tools.intent_to_tool
+                    let expanded = mappings.expand_aliases();
+                    tracing::info!(
+                        intent_mappings = expanded.len(),
+                        slot_aliases = mappings.slot_aliases.len(),
+                        tool_defaults = mappings.tool_defaults.len(),
+                        argument_mappings = mappings.argument_mappings.len(),
+                        "Loaded intent-to-tool mappings"
+                    );
+                    // Merge expanded mappings into tools config
+                    for (intent, mapping) in expanded {
+                        config.tools.intent_to_tool.insert(intent, mapping);
+                    }
+                    // P16 FIX: Merge slot_aliases, tool_defaults, and argument_mappings
+                    for (alias, canonical) in mappings.slot_aliases {
+                        config.tools.slot_aliases.insert(alias, canonical);
+                    }
+                    for (tool, defaults) in mappings.tool_defaults {
+                        config.tools.tool_defaults.insert(tool, defaults);
+                    }
+                    for (tool, arg_mapping) in mappings.argument_mappings {
+                        config.tools.argument_mappings.insert(tool, arg_mapping);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load intent-to-tool mappings: {}", e);
+                }
+            }
+        } else {
+            tracing::debug!("No intent-to-tool mappings found at {:?}", mappings_path);
         }
 
         // 9. Load prompts configuration (optional)
@@ -726,6 +768,25 @@ impl MasterDomainConfig {
             }
         } else {
             tracing::debug!("No documents config found at {:?}", documents_path);
+        }
+
+        // 18. P16 FIX: Load tool response templates (optional)
+        let responses_path = config_dir.join(format!("domains/{}/tools/responses.yaml", domain_id));
+        if responses_path.exists() {
+            match ToolResponsesConfig::load(&responses_path) {
+                Ok(responses) => {
+                    tracing::info!(
+                        tools_with_templates = responses.templates.len(),
+                        "Loaded tool response templates"
+                    );
+                    config.tool_responses = responses;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load tool response templates: {}", e);
+                }
+            }
+        } else {
+            tracing::debug!("No tool response templates found at {:?}", responses_path);
         }
 
         tracing::info!(

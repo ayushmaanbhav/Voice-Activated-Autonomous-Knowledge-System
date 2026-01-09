@@ -120,6 +120,44 @@ impl CompetitorsConfig {
     pub fn competitor_ids(&self) -> Vec<&str> {
         self.competitors.keys().map(|k| k.as_str()).collect()
     }
+
+    /// P16 FIX: Generate competitor patterns for IntentDetector::add_competitor_patterns()
+    ///
+    /// Returns tuples of (id, display_name, regex_pattern) for each competitor.
+    /// The regex patterns are generated from the competitor ID and aliases.
+    pub fn to_intent_patterns(&self) -> Vec<(String, String, String)> {
+        let mut patterns = Vec::new();
+
+        for (id, entry) in &self.competitors {
+            // Build pattern from ID and aliases
+            let mut all_names = vec![id.clone()];
+            all_names.extend(entry.aliases.iter().cloned());
+
+            // Create regex pattern that matches any of the names (case-insensitive)
+            let alternatives = all_names
+                .iter()
+                .map(|name| regex::escape(name))
+                .collect::<Vec<_>>()
+                .join("|");
+
+            let pattern = format!(r"(?i)\b({})\b", alternatives);
+
+            patterns.push((id.clone(), entry.display_name.clone(), pattern));
+        }
+
+        patterns
+    }
+
+    /// Get all competitor names and aliases as a flat list (for text processing)
+    pub fn all_names_and_aliases(&self) -> Vec<&str> {
+        let mut names = Vec::new();
+        for (id, entry) in &self.competitors {
+            names.push(id.as_str());
+            names.push(entry.display_name.as_str());
+            names.extend(entry.aliases.iter().map(|s| s.as_str()));
+        }
+        names
+    }
 }
 
 /// Single competitor entry

@@ -4,7 +4,6 @@
 //! Intents are loaded from domain config files instead of being hardcoded.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::Path;
 
 /// Intents configuration loaded from intents.yaml

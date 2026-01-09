@@ -27,6 +27,15 @@ pub struct ToolsConfig {
     /// Maps intent names to tool configurations
     #[serde(default)]
     pub intent_to_tool: HashMap<String, IntentToolMapping>,
+    /// P16 FIX: Slot name aliases for normalization
+    #[serde(default)]
+    pub slot_aliases: HashMap<String, String>,
+    /// P16 FIX: Tool argument defaults
+    #[serde(default)]
+    pub tool_defaults: HashMap<String, HashMap<String, serde_json::Value>>,
+    /// P16 FIX: Tool argument name mappings
+    #[serde(default)]
+    pub argument_mappings: HashMap<String, HashMap<String, String>>,
 }
 
 /// P16 FIX: Mapping from intent to tool with optional conditions
@@ -40,6 +49,70 @@ pub struct IntentToolMapping {
     /// Alternative tool if required slots are not present
     #[serde(default)]
     pub fallback_tool: Option<String>,
+    /// Aliases for this intent (will be auto-expanded to create additional mappings)
+    #[serde(default)]
+    pub aliases: Vec<String>,
+}
+
+/// P16 FIX: Extended intent-to-tool config loaded from intent_tool_mappings.yaml
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IntentToolMappingsConfig {
+    /// Intent to tool mappings (with aliases)
+    #[serde(default)]
+    pub intent_to_tool: HashMap<String, IntentToolMapping>,
+    /// Slot name aliases for normalization
+    #[serde(default)]
+    pub slot_aliases: HashMap<String, String>,
+    /// Tool argument defaults
+    #[serde(default)]
+    pub tool_defaults: HashMap<String, HashMap<String, serde_json::Value>>,
+    /// Tool argument name mappings
+    #[serde(default)]
+    pub argument_mappings: HashMap<String, HashMap<String, String>>,
+}
+
+impl IntentToolMappingsConfig {
+    /// Load from a YAML file
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, ToolsConfigError> {
+        let content = std::fs::read_to_string(path.as_ref()).map_err(|e| {
+            ToolsConfigError::FileNotFound(path.as_ref().display().to_string(), e.to_string())
+        })?;
+
+        serde_yaml::from_str(&content).map_err(|e| ToolsConfigError::ParseError(e.to_string()))
+    }
+
+    /// Expand aliases into flat intent_to_tool map
+    /// Returns a HashMap where both primary intents and aliases point to their mappings
+    pub fn expand_aliases(&self) -> HashMap<String, IntentToolMapping> {
+        let mut expanded = HashMap::new();
+
+        for (intent, mapping) in &self.intent_to_tool {
+            // Add the primary intent
+            expanded.insert(intent.clone(), mapping.clone());
+
+            // Add all aliases pointing to the same mapping
+            for alias in &mapping.aliases {
+                expanded.insert(alias.clone(), mapping.clone());
+            }
+        }
+
+        expanded
+    }
+
+    /// Normalize a slot name using slot_aliases
+    pub fn normalize_slot<'a>(&'a self, slot: &'a str) -> &'a str {
+        self.slot_aliases.get(slot).map(|s| s.as_str()).unwrap_or(slot)
+    }
+
+    /// Get tool defaults for a tool
+    pub fn get_tool_defaults(&self, tool: &str) -> Option<&HashMap<String, serde_json::Value>> {
+        self.tool_defaults.get(tool)
+    }
+
+    /// Get argument mapping for a tool
+    pub fn get_argument_mapping(&self, tool: &str) -> Option<&HashMap<String, String>> {
+        self.argument_mappings.get(tool)
+    }
 }
 
 impl Default for ToolsConfig {
@@ -48,6 +121,9 @@ impl Default for ToolsConfig {
             tools: HashMap::new(),
             usage_guidelines: HashMap::new(),
             intent_to_tool: HashMap::new(),
+            slot_aliases: HashMap::new(),
+            tool_defaults: HashMap::new(),
+            argument_mappings: HashMap::new(),
         }
     }
 }
@@ -156,6 +232,21 @@ impl ToolsConfig {
     /// Get all configured intent names
     pub fn mapped_intents(&self) -> Vec<&str> {
         self.intent_to_tool.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Get tool defaults for a tool
+    pub fn get_tool_defaults(&self, tool: &str) -> Option<&HashMap<String, serde_json::Value>> {
+        self.tool_defaults.get(tool)
+    }
+
+    /// Get argument mapping for a tool
+    pub fn get_argument_mapping(&self, tool: &str) -> Option<&HashMap<String, String>> {
+        self.argument_mappings.get(tool)
+    }
+
+    /// Normalize a slot name using slot_aliases
+    pub fn normalize_slot<'a>(&'a self, slot: &'a str) -> &'a str {
+        self.slot_aliases.get(slot).map(|s| s.as_str()).unwrap_or(slot)
     }
 }
 

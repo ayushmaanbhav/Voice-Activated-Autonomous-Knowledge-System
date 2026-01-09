@@ -169,6 +169,38 @@ impl SegmentsConfig {
             .map(|def| def.features.iter().map(|s| s.as_str()).collect())
             .unwrap_or_default()
     }
+
+    /// P16 FIX: Get high_value segment thresholds
+    /// Returns (collateral_min, loan_amount_min) for use with CustomerProfile::infer_segment_with_thresholds
+    pub fn get_high_value_thresholds(&self) -> (f64, f64) {
+        let defaults = (100.0, 500_000.0);  // Fallback defaults
+
+        if let Some(high_value) = self.segments.get("high_value") {
+            if let Some(ref thresholds) = high_value.detection.numeric_thresholds {
+                let collateral = thresholds.get("gold_weight_grams")
+                    .or_else(|| thresholds.get("asset_quantity"))
+                    .and_then(|t| t.min)
+                    .unwrap_or(defaults.0);
+
+                let amount = thresholds.get("loan_amount")
+                    .or_else(|| thresholds.get("requested_amount"))
+                    .and_then(|t| t.min)
+                    .unwrap_or(defaults.1);
+
+                return (collateral, amount);
+            }
+        }
+
+        defaults
+    }
+
+    /// Get a numeric threshold value for a segment
+    pub fn get_numeric_threshold(&self, segment_id: &str, threshold_key: &str) -> Option<f64> {
+        self.segments.get(segment_id)
+            .and_then(|def| def.detection.numeric_thresholds.as_ref())
+            .and_then(|thresholds| thresholds.get(threshold_key))
+            .and_then(|t| t.min)
+    }
 }
 
 /// Single segment definition

@@ -178,6 +178,7 @@ impl Tool for GetPriceTool {
             result["weight_grams"] = json!(w);
         }
 
+        // P16 FIX: Use config-driven response templates
         if let Some(p) = purity {
             let price = match p {
                 "24K" => price_24k,
@@ -186,15 +187,34 @@ impl Tool for GetPriceTool {
                 _ => price_22k,
             };
             result["requested_purity"] = json!(p);
-            result["message"] = json!(format!(
-                "Current {} gold price is ₹{:.0} per gram.",
-                p, price
-            ));
+            let message = if self.view.has_response_templates("get_price") {
+                let mut vars = self.view.default_template_vars();
+                vars.insert("purity".to_string(), p.to_string());
+                vars.insert("price".to_string(), format!("{:.0}", price));
+                self.view.render_response("get_price", "single_purity", "en", &vars)
+                    .unwrap_or_else(|| format!("Current {} gold price is ₹{:.0} per gram.", p, price))
+            } else {
+                format!("Current {} gold price is ₹{:.0} per gram.", p, price)
+            };
+            result["message"] = json!(message);
         } else {
-            result["message"] = json!(format!(
-                "Current gold prices - 24K: ₹{:.0}/g, 22K: ₹{:.0}/g, 18K: ₹{:.0}/g",
-                price_24k, price_22k, price_18k
-            ));
+            let message = if self.view.has_response_templates("get_price") {
+                let mut vars = self.view.default_template_vars();
+                vars.insert("price_24k".to_string(), format!("{:.0}", price_24k));
+                vars.insert("price_22k".to_string(), format!("{:.0}", price_22k));
+                vars.insert("price_18k".to_string(), format!("{:.0}", price_18k));
+                self.view.render_response("get_price", "all_prices", "en", &vars)
+                    .unwrap_or_else(|| format!(
+                        "Current gold prices - 24K: ₹{:.0}/g, 22K: ₹{:.0}/g, 18K: ₹{:.0}/g",
+                        price_24k, price_22k, price_18k
+                    ))
+            } else {
+                format!(
+                    "Current gold prices - 24K: ₹{:.0}/g, 22K: ₹{:.0}/g, 18K: ₹{:.0}/g",
+                    price_24k, price_22k, price_18k
+                )
+            };
+            result["message"] = json!(message);
         }
 
         Ok(ToolOutput::json(result))

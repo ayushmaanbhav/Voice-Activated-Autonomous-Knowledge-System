@@ -214,221 +214,24 @@ impl ConfigSegmentDefinition {
         self
     }
 
-    // === PRESERVED GOLD LOAN SEGMENTS ===
-
-    /// Create high-value segment
-    /// PRESERVED: gold_weight >= 100g OR loan_amount >= 500000
-    pub fn high_value() -> Self {
-        Self::new("high_value", "High Value", "High-value customer with significant assets", 1)
-            .with_numeric_thresholds([
-                ("asset_quantity".to_string(), 100.0),
-                ("loan_amount".to_string(), 500_000.0),
-            ].into_iter().collect())
-            .with_text_patterns("en", vec![
-                "lakh".to_string(),
-                "crore".to_string(),
-                "100 gram".to_string(),
-                "large amount".to_string(),
-                "significant".to_string(),
-                "premium".to_string(),
-            ])
-            .with_text_patterns("hi", vec![
-                "लाख".to_string(),
-                "करोड़".to_string(),
-                "सौ ग्राम".to_string(),
-            ])
-            .with_features(vec![
-                "relationship_manager".to_string(),
-                "priority_processing".to_string(),
-                "premium_rates".to_string(),
-                "dedicated_support".to_string(),
-            ])
-    }
-
-    /// Create trust-seeker segment
-    /// PRESERVED: NBFC lender detection + safety keywords
-    pub fn trust_seeker() -> Self {
-        Self::new("trust_seeker", "Trust Seeker", "Customer prioritizing safety and security", 2)
-            .with_slot_patterns([
-                ("current_lender".to_string(), vec![
-                    "muthoot".to_string(),
-                    "manappuram".to_string(),
-                    "iifl".to_string(),
-                    "local".to_string(),
-                    "jeweler".to_string(),
-                ]),
-            ].into_iter().collect())
-            .with_text_patterns("en", vec![
-                "safe".to_string(),
-                "security".to_string(),
-                "trust".to_string(),
-                "rbi".to_string(),
-                "government".to_string(),
-                "bank vault".to_string(),
-                "worried".to_string(),
-                "scared".to_string(),
-            ])
-            .with_text_patterns("hi", vec![
-                "सुरक्षा".to_string(),
-                "भरोसा".to_string(),
-                "विश्वास".to_string(),
-                "सरकारी".to_string(),
-            ])
-            .with_features(vec![
-                "rbi_regulated".to_string(),
-                "bank_security".to_string(),
-                "vault_storage".to_string(),
-                "insurance".to_string(),
-            ])
-    }
-
-    /// Create price-sensitive segment
-    /// PRESERVED: rate/interest/save keywords
-    pub fn price_sensitive() -> Self {
-        Self::new("price_sensitive", "Price Sensitive", "Customer focused on rates and savings", 3)
-            .with_text_patterns("en", vec![
-                "rate".to_string(),
-                "interest".to_string(),
-                "cheap".to_string(),
-                "expensive".to_string(),
-                "save".to_string(),
-                "savings".to_string(),
-                "compare".to_string(),
-                "emi".to_string(),
-                "monthly payment".to_string(),
-            ])
-            .with_text_patterns("hi", vec![
-                "ब्याज".to_string(),
-                "दर".to_string(),
-                "सस्ता".to_string(),
-                "महंगा".to_string(),
-                "बचत".to_string(),
-                "ईएमआई".to_string(),
-                "किस्त".to_string(),
-            ])
-            .with_features(vec![
-                "competitive_rates".to_string(),
-                "savings_calculator".to_string(),
-                "flexible_repayment".to_string(),
-                "no_hidden_charges".to_string(),
-            ])
-    }
-
-    /// Create urgent-need segment
-    /// PRESERVED: urgent/emergency/today keywords
-    pub fn urgent_need() -> Self {
-        Self::new("urgent_need", "Urgent Need", "Customer with immediate financial need", 1)
-            .with_text_patterns("en", vec![
-                "urgent".to_string(),
-                "emergency".to_string(),
-                "immediately".to_string(),
-                "today".to_string(),
-                "right now".to_string(),
-                "asap".to_string(),
-                "quick".to_string(),
-                "fast".to_string(),
-                "hospital".to_string(),
-                "medical".to_string(),
-            ])
-            .with_text_patterns("hi", vec![
-                "जल्दी".to_string(),
-                "तुरंत".to_string(),
-                "आज".to_string(),
-                "अभी".to_string(),
-                "इमरजेंसी".to_string(),
-                "अस्पताल".to_string(),
-            ])
-            .with_features(vec![
-                "same_day_disbursement".to_string(),
-                "minimal_documentation".to_string(),
-                "quick_valuation".to_string(),
-            ])
-    }
-
-    /// Create balance-transfer segment
-    /// PRESERVED: existing loan detection
-    pub fn balance_transfer() -> Self {
-        Self::new("balance_transfer", "Balance Transfer", "Customer with existing loan elsewhere", 2)
-            .with_text_patterns("en", vec![
-                "already have".to_string(),
-                "existing loan".to_string(),
-                "current loan".to_string(),
-                "transfer".to_string(),
-                "switch".to_string(),
-                "move".to_string(),
-                "paying".to_string(),
-                "emi".to_string(),
-            ])
-            .with_text_patterns("hi", vec![
-                "पहले से".to_string(),
-                "मौजूदा लोन".to_string(),
-                "ट्रांसफर".to_string(),
-                "बदलना".to_string(),
-                "चल रहा".to_string(),
-            ])
-            .with_features(vec![
-                "easy_transfer".to_string(),
-                "rate_comparison".to_string(),
-                "savings_calculation".to_string(),
-                "quick_closure".to_string(),
-            ])
-    }
-
-    /// Create first-time borrower segment
-    /// PRESERVED: first time/new keywords
-    pub fn first_time() -> Self {
-        Self::new("first_time", "First Time Borrower", "Customer new to gold loans", 4)
-            .with_text_patterns("en", vec![
-                "first time".to_string(),
-                "never".to_string(),
-                "new to".to_string(),
-                "how does".to_string(),
-                "what is".to_string(),
-                "explain".to_string(),
-                "don't understand".to_string(),
-            ])
-            .with_text_patterns("hi", vec![
-                "पहली बार".to_string(),
-                "कभी नहीं".to_string(),
-                "नया हूं".to_string(),
-                "कैसे".to_string(),
-                "क्या है".to_string(),
-                "समझाइए".to_string(),
-            ])
-            .with_features(vec![
-                "step_by_step_guidance".to_string(),
-                "simple_process".to_string(),
-                "support".to_string(),
-            ])
-    }
-
-    /// Create business-owner segment
-    /// PRESERVED: business/shop/capital keywords
-    pub fn business_owner() -> Self {
-        Self::new("business_owner", "Business Owner", "Customer needing business capital", 3)
-            .with_text_patterns("en", vec![
-                "business".to_string(),
-                "shop".to_string(),
-                "store".to_string(),
-                "inventory".to_string(),
-                "working capital".to_string(),
-                "supplier".to_string(),
-                "stock".to_string(),
-                "company".to_string(),
-            ])
-            .with_text_patterns("hi", vec![
-                "व्यापार".to_string(),
-                "दुकान".to_string(),
-                "कारोबार".to_string(),
-                "माल".to_string(),
-                "पूंजी".to_string(),
-            ])
-            .with_features(vec![
-                "business_friendly".to_string(),
-                "flexible_repayment".to_string(),
-                "higher_limits".to_string(),
-            ])
-    }
+    // P0 FIX: All preset segment methods (high_value, trust_seeker, price_sensitive,
+    // urgent_need, balance_transfer, first_time, business_owner) have been REMOVED.
+    //
+    // These presets contained hardcoded domain-specific values (competitor names,
+    // gold-specific thresholds, etc.) that violated domain-agnostic principles.
+    //
+    // All segments MUST be loaded from domain config via:
+    //   config/domains/{domain}/segments.yaml
+    //
+    // To onboard a new domain, define segments in the config file with appropriate:
+    // - Numeric thresholds (e.g., collateral quantity, loan amount)
+    // - Text patterns (in all supported languages)
+    // - Slot patterns (for competitor detection, etc.)
+    // - Features to emphasize
+    //
+    // Example usage:
+    //   let segments_config = master_domain_config.segments.clone();
+    //   let detector = segments_config.to_segment_detector();
 }
 
 impl SegmentDefinition for ConfigSegmentDefinition {
@@ -684,17 +487,37 @@ impl SegmentDetector for ConfigSegmentDetector {
 mod tests {
     use super::*;
 
-    /// Create test segment detector with typical segments
+    /// P0 FIX: Create test segment detector with config-driven segments
+    /// These are test-only segments that don't contain domain-specific values
     fn test_detector() -> ConfigSegmentDetector {
         ConfigSegmentDetector::new(
             vec![
-                ConfigSegmentDefinition::urgent_need(),
-                ConfigSegmentDefinition::high_value(),
-                ConfigSegmentDefinition::balance_transfer(),
-                ConfigSegmentDefinition::trust_seeker(),
-                ConfigSegmentDefinition::price_sensitive(),
-                ConfigSegmentDefinition::business_owner(),
-                ConfigSegmentDefinition::first_time(),
+                // Urgent need segment (priority 1)
+                ConfigSegmentDefinition::new("urgent_need", "Urgent Need", "Customer with immediate need", 1)
+                    .with_text_patterns("en", vec![
+                        "urgent".to_string(),
+                        "emergency".to_string(),
+                        "immediately".to_string(),
+                    ])
+                    .with_features(vec!["same_day_disbursement".to_string()]),
+                // High value segment (priority 1)
+                ConfigSegmentDefinition::new("high_value", "High Value", "High-value customer", 1)
+                    .with_numeric_thresholds([
+                        ("loan_amount".to_string(), 500_000.0),
+                    ].into_iter().collect())
+                    .with_text_patterns("en", vec!["lakh".to_string()]),
+                // Trust seeker segment (priority 2)
+                ConfigSegmentDefinition::new("trust_seeker", "Trust Seeker", "Safety-focused customer", 2)
+                    .with_slot_patterns([
+                        ("current_lender".to_string(), vec!["competitor".to_string()]),
+                    ].into_iter().collect())
+                    .with_text_patterns("en", vec!["safe".to_string(), "security".to_string()]),
+                // Price sensitive segment (priority 3)
+                ConfigSegmentDefinition::new("price_sensitive", "Price Sensitive", "Rate-focused customer", 3)
+                    .with_text_patterns("en", vec!["rate".to_string(), "interest".to_string()]),
+                // First time segment (priority 4, default)
+                ConfigSegmentDefinition::new("first_time", "First Time", "New customer", 4)
+                    .with_text_patterns("en", vec!["first time".to_string(), "new to".to_string()]),
             ],
             "first_time",
         )
@@ -726,9 +549,9 @@ mod tests {
         let detector = test_detector();
         let values = HashMap::new();
         let mut slots = HashMap::new();
-        slots.insert("current_lender".to_string(), "muthoot".to_string());
+        slots.insert("current_lender".to_string(), "competitor".to_string());
 
-        // Use text that doesn't trigger balance_transfer segment
+        // Use text that doesn't trigger other segments
         let primary = detector.primary_segment("I need a loan", "en", &values, &slots);
         assert_eq!(primary, "trust_seeker");
     }

@@ -23,6 +23,7 @@ mod segments;
 mod slots;
 mod sms_templates;
 mod stages;
+mod tool_responses;
 mod tools;
 mod validator;
 mod views;
@@ -64,7 +65,8 @@ pub use sms_templates::{SmsCategories, SmsConfig, SmsTemplatesConfig, SmsTemplat
 pub use stages::{
     StageDefinition, StageRequirements, StagesConfig, StagesConfigError, TransitionTrigger,
 };
-pub use tools::{IntentToolMapping, ToolDefinition, ToolParameter, ToolSchema, ToolsConfig, ToolsConfigError};
+pub use tool_responses::{ToolResponsesConfig, ToolResponsesConfigError, ToolTemplates, TemplateVariant};
+pub use tools::{IntentToolMapping, IntentToolMappingsConfig, ToolDefinition, ToolParameter, ToolSchema, ToolsConfig, ToolsConfigError};
 pub use views::{AgentDomainView, CompetitorInfo, LlmDomainView, MonthlySavings, ToolsDomainView};
 
 // P13 FIX: Domain bridge for trait implementations

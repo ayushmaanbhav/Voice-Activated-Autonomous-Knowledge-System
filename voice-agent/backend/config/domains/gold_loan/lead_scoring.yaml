@@ -1,0 +1,162 @@
+# Gold Loan Domain - Lead Scoring Configuration
+# P16 FIX: Config-driven signal mappings for domain-agnostic lead scoring
+
+# Intent to signal mappings
+# Maps detected intents to lead scoring signals to update
+intent_signal_mappings:
+  # Loan/eligibility inquiries - increment engagement
+  loan_inquiry:
+    signals:
+      - increment_engagement_turns
+    slot_checks:
+      # If these slots are present, set additional signals
+      - slots: [loan_amount, offer_amount, requested_amount, amount]
+        signals: [provided_loan_amount, has_specific_requirements]
+
+  eligibility_query:
+    signals:
+      - increment_engagement_turns
+    slot_checks:
+      - slots: [loan_amount, offer_amount, requested_amount, amount]
+        signals: [provided_loan_amount, has_specific_requirements]
+
+  # Interest rate queries
+  interest_rate_query:
+    signals:
+      - asked_about_rates
+      - increment_engagement_turns
+
+  # Balance transfer / competitor mentions
+  switch_lender:
+    signals:
+      - mentioned_other_banks
+      - asked_for_comparison
+      - increment_engagement_turns
+
+  balance_transfer:
+    signals:
+      - mentioned_other_banks
+      - asked_for_comparison
+      - increment_engagement_turns
+
+  # Schedule intents - strong buying signals
+  schedule_visit:
+    signals:
+      - expressed_intent_to_proceed
+      - requested_branch_visit
+
+  schedule_callback:
+    signals:
+      - expressed_intent_to_proceed
+      - requested_callback
+
+  # Objection handling
+  objection:
+    signals:
+      - increment_objections_raised
+
+  affirmative:
+    signals:
+      - resolve_objection_if_pending
+
+  agreement:
+    signals:
+      - resolve_objection_if_pending
+
+  # Negative signals
+  negative:
+    signals:
+      - expressed_disinterest
+
+  rejection:
+    signals:
+      - expressed_disinterest
+
+  # Escalation requests
+  escalate:
+    signals:
+      - requested_human_agent
+
+  human_agent:
+    signals:
+      - requested_human_agent
+
+  # Questions - engagement signal
+  question:
+    signals:
+      - increment_questions_asked
+      - increment_engagement_turns
+
+# Slot to signal mappings
+# When these slots are present, set the corresponding signals
+slot_signal_mappings:
+  # Contact info slots
+  phone_number:
+    signal: provided_contact_info
+  customer_name:
+    signal: provided_contact_info
+  phone:
+    signal: provided_contact_info
+
+  # Asset details - domain-specific gold loan slots
+  gold_weight:
+    signal: provided_asset_details
+  gold_purity:
+    signal: provided_asset_details
+
+  # Asset details - generic slot names (for domain-agnostic use)
+  asset_quantity:
+    signal: provided_asset_details
+  asset_quality:
+    signal: provided_asset_details
+
+# Urgency detection keywords
+# Both English and Hindi/Hinglish keywords
+urgency_keywords:
+  english:
+    - urgent
+    - urgently
+    - immediately
+    - today
+    - now
+    - asap
+    - emergency
+    - quickly
+    - fast
+    - soon
+
+  hindi:
+    - jaldi        # quickly
+    - abhi         # now
+    - turant       # immediately
+    - aaj          # today
+    - foran        # immediately
+    - jhat se      # quickly
+    - fatafat      # fast
+
+# Signal weights for score calculation
+# These determine how much each signal contributes to the final score
+signal_weights:
+  engagement_turns: 2
+  asked_about_rates: 5
+  mentioned_other_banks: 3
+  asked_for_comparison: 4
+  provided_loan_amount: 5
+  provided_contact_info: 10
+  provided_asset_details: 8
+  has_specific_requirements: 4
+  has_urgency_signal: 6
+  expressed_intent_to_proceed: 15
+  requested_branch_visit: 12
+  requested_callback: 10
+  questions_asked: 1
+  objections_raised: -2
+  objections_resolved: 3
+  expressed_disinterest: -10
+  requested_human_agent: 0
+
+# Score thresholds for qualification levels
+qualification_thresholds:
+  hot: 70       # >= 70: Hot lead, ready to convert
+  warm: 40      # >= 40: Warm lead, needs nurturing
+  cold: 0       # < 40: Cold lead, low intent

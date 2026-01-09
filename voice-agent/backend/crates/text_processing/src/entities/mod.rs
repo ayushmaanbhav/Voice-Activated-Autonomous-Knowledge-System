@@ -189,22 +189,19 @@ static NAME_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)(?:my\s+name\s+is|i\s+am|mera\s+naam|मेरा\s+नाम)\s+([A-Za-z\u0900-\u097F]+(?:\s+[A-Za-z\u0900-\u097F]+)?)").unwrap()
 });
 
-static LENDER_PATTERNS: Lazy<Vec<(&'static str, Regex)>> = Lazy::new(|| {
-    vec![
-        ("Muthoot", Regex::new(r"(?i)muthoot").unwrap()),
-        ("Manappuram", Regex::new(r"(?i)manappuram").unwrap()),
-        ("IIFL", Regex::new(r"(?i)iifl").unwrap()),
-        ("HDFC", Regex::new(r"(?i)hdfc").unwrap()),
-        ("SBI", Regex::new(r"(?i)\bsbi\b").unwrap()),
-        ("ICICI", Regex::new(r"(?i)icici").unwrap()),
-        ("Axis", Regex::new(r"(?i)axis").unwrap()),
-    ]
-});
+// P0 FIX: LENDER_PATTERNS removed - lenders must be loaded from domain config
+// Use LoanEntityExtractor::with_lenders() to provide domain-specific lender patterns
+// from config/domains/{domain}/competitors.yaml
 
 /// Loan entity extractor
+///
+/// P0 FIX: Made domain-agnostic by requiring lender patterns from config.
+/// Use `with_lenders()` to provide competitor names from domain config.
 pub struct LoanEntityExtractor {
     /// Whether to extract Hindi/Devanagari numbers
     pub support_hindi: bool,
+    /// Config-driven lender patterns (competitor names from domain config)
+    lender_patterns: Vec<(String, Regex)>,
 }
 
 impl Default for LoanEntityExtractor {
@@ -215,10 +212,54 @@ impl Default for LoanEntityExtractor {
 
 impl LoanEntityExtractor {
     /// Create a new extractor with default settings
+    ///
+    /// NOTE: For domain-agnostic operation, use `with_lenders()` to provide
+    /// competitor names from domain config. The default extractor has no
+    /// lender patterns and will not extract current_lender values.
     pub fn new() -> Self {
         Self {
             support_hindi: true,
+            lender_patterns: Vec::new(), // P0 FIX: Empty by default, load from config
         }
+    }
+
+    /// Create extractor with config-driven lender patterns
+    ///
+    /// # Arguments
+    /// * `lender_names` - List of competitor/lender names from domain config
+    ///
+    /// # Example
+    /// ```ignore
+    /// let competitors = config.competitors.iter().map(|c| c.name.clone()).collect();
+    /// let extractor = LoanEntityExtractor::with_lenders(competitors);
+    /// ```
+    pub fn with_lenders(lender_names: Vec<String>) -> Self {
+        let lender_patterns = lender_names
+            .into_iter()
+            .filter_map(|name| {
+                // Create case-insensitive regex for the lender name
+                let pattern = format!(r"(?i)\b{}\b", regex::escape(&name));
+                Regex::new(&pattern)
+                    .ok()
+                    .map(|regex| (name, regex))
+            })
+            .collect();
+
+        Self {
+            support_hindi: true,
+            lender_patterns,
+        }
+    }
+
+    /// Add lender patterns from config (builder pattern)
+    pub fn add_lenders(mut self, lender_names: Vec<String>) -> Self {
+        for name in lender_names {
+            let pattern = format!(r"(?i)\b{}\b", regex::escape(&name));
+            if let Ok(regex) = Regex::new(&pattern) {
+                self.lender_patterns.push((name, regex));
+            }
+        }
+        self
     }
 
     /// Extract all loan entities from text
@@ -357,10 +398,14 @@ impl LoanEntityExtractor {
     }
 
     /// Extract current lender name
+    ///
+    /// P0 FIX: Uses config-driven lender patterns. Returns None if no patterns configured.
+    /// For domain-specific extraction, create extractor with `with_lenders()`.
     pub fn extract_lender(&self, text: &str) -> Option<String> {
-        for (name, pattern) in LENDER_PATTERNS.iter() {
+        // P0 FIX: Use instance lender_patterns instead of hardcoded static patterns
+        for (name, pattern) in &self.lender_patterns {
             if pattern.is_match(text) {
-                return Some(name.to_string());
+                return Some(name.clone());
             }
         }
         None
@@ -499,7 +544,12 @@ mod tests {
 
     #[test]
     fn test_extract_lender() {
-        let extractor = LoanEntityExtractor::new();
+        // P0 FIX: Test with config-driven lender patterns
+        let extractor = LoanEntityExtractor::with_lenders(vec![
+            "Muthoot".to_string(),
+            "IIFL".to_string(),
+            "Manappuram".to_string(),
+        ]);
 
         let result = extractor.extract_lender("I have loan from Muthoot Finance");
         assert_eq!(result, Some("Muthoot".to_string()));
@@ -509,8 +559,21 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_all_entities() {
+    fn test_extract_lender_no_config() {
+        // P0 FIX: Test that default extractor returns None for lenders
         let extractor = LoanEntityExtractor::new();
+
+        let result = extractor.extract_lender("I have loan from Muthoot Finance");
+        assert_eq!(result, None); // No patterns configured = no extraction
+    }
+
+    #[test]
+    fn test_extract_all_entities() {
+        // P0 FIX: Test with config-driven lender patterns
+        let extractor = LoanEntityExtractor::with_lenders(vec![
+            "Muthoot".to_string(),
+            "IIFL".to_string(),
+        ]);
 
         let text = "My name is Rahul. I want 5 lakh loan for 12 months at 10% interest. I have 50 grams of 22k gold. Currently with Muthoot.";
         let entities = extractor.extract(text);

@@ -463,8 +463,8 @@ pub struct FullIntegrationConfig {
     pub calendar: Option<Arc<dyn crate::integrations::CalendarIntegration>>,
     /// SMS service for sending messages (persisted to ScyllaDB)
     pub sms_service: Option<Arc<dyn voice_agent_persistence::SmsService>>,
-    /// Gold price service (persisted to ScyllaDB)
-    pub gold_price_service: Option<Arc<dyn voice_agent_persistence::GoldPriceService>>,
+    /// P16 FIX: Asset price service (generic, gold_price_service for backwards compatibility)
+    pub gold_price_service: Option<Arc<dyn voice_agent_persistence::AssetPriceService>>,
 }
 
 impl FullIntegrationConfig {
@@ -491,8 +491,9 @@ impl FullIntegrationConfig {
             sms_service: Some(
                 Arc::new(persistence.sms.clone()) as Arc<dyn voice_agent_persistence::SmsService>
             ),
-            gold_price_service: Some(Arc::new(persistence.gold_price.clone())
-                as Arc<dyn voice_agent_persistence::GoldPriceService>),
+            // P16 FIX: Use generic asset_price field (AssetPriceService)
+            gold_price_service: Some(Arc::new(persistence.asset_price.clone())
+                as Arc<dyn voice_agent_persistence::AssetPriceService>),
         }
     }
 
@@ -517,10 +518,19 @@ impl FullIntegrationConfig {
         self
     }
 
-    /// Set gold price service
+    /// P16 FIX: Set asset price service (gold_price_service alias for backwards compatibility)
     pub fn with_gold_price_service(
         mut self,
-        price: Arc<dyn voice_agent_persistence::GoldPriceService>,
+        price: Arc<dyn voice_agent_persistence::AssetPriceService>,
+    ) -> Self {
+        self.gold_price_service = Some(price);
+        self
+    }
+
+    /// P16 FIX: Set asset price service (preferred method name)
+    pub fn with_asset_price_service(
+        mut self,
+        price: Arc<dyn voice_agent_persistence::AssetPriceService>,
     ) -> Self {
         self.gold_price_service = Some(price);
         self

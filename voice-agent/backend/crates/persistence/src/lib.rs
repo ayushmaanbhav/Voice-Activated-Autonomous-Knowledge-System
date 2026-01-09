@@ -40,7 +40,7 @@ pub async fn init(config: ScyllaConfig) -> Result<PersistenceLayer, PersistenceE
     Ok(PersistenceLayer {
         sessions: ScyllaSessionStore::new(client.clone()),
         sms: SimulatedSmsService::new(client.clone()),
-        gold_price: SimulatedGoldPriceService::new(client.clone(), 7500.0),
+        asset_price: SimulatedAssetPriceService::new(client.clone(), 7500.0),
         appointments: ScyllaAppointmentStore::new(client.clone()),
         audit: ScyllaAuditLog::new(client),
     })
@@ -50,8 +50,17 @@ pub async fn init(config: ScyllaConfig) -> Result<PersistenceLayer, PersistenceE
 pub struct PersistenceLayer {
     pub sessions: ScyllaSessionStore,
     pub sms: SimulatedSmsService,
-    pub gold_price: SimulatedGoldPriceService,
+    /// P16 FIX: Generic asset price service (gold_price alias kept for backwards compatibility)
+    pub asset_price: SimulatedAssetPriceService,
     pub appointments: ScyllaAppointmentStore,
     /// P0 FIX: Audit logging for RBI compliance
     pub audit: ScyllaAuditLog,
+}
+
+impl PersistenceLayer {
+    /// Legacy accessor for backwards compatibility
+    #[inline]
+    pub fn gold_price(&self) -> &SimulatedAssetPriceService {
+        &self.asset_price
+    }
 }

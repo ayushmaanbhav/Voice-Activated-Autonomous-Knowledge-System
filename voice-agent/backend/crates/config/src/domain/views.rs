@@ -226,6 +226,21 @@ impl AgentDomainView {
         self.config.stages.stage_ids()
     }
 
+    /// P16 FIX: Get intent-based transition target stage
+    ///
+    /// Returns the target stage ID for an intent + current stage combination,
+    /// if defined in config and the min_turns requirement is satisfied.
+    pub fn get_intent_transition(
+        &self,
+        intent: &str,
+        current_stage: &str,
+        current_turns: usize,
+    ) -> Option<&str> {
+        self.config
+            .stages
+            .can_transition_on_intent(intent, current_stage, current_turns)
+    }
+
     // ====== Lead Scoring Configuration ======
 
     /// Get the full scoring configuration
@@ -471,6 +486,25 @@ impl AgentDomainView {
     /// Check if intent-to-tool mappings are configured
     pub fn has_intent_mappings(&self) -> bool {
         self.config.tools.has_intent_mappings()
+    }
+
+    /// Get default arguments for a tool
+    /// Returns a HashMap of argument_name -> default_value
+    pub fn get_tool_defaults(&self, tool: &str) -> Option<&std::collections::HashMap<String, serde_json::Value>> {
+        self.config.tools.get_tool_defaults(tool)
+    }
+
+    /// Get argument name mapping for a tool
+    /// Returns a HashMap of slot_name -> tool_argument_name
+    pub fn get_argument_mapping(&self, tool: &str) -> Option<&std::collections::HashMap<String, String>> {
+        self.config.tools.get_argument_mapping(tool)
+    }
+
+    /// Map a slot name to the corresponding tool argument name
+    pub fn map_slot_to_argument<'a>(&'a self, tool: &str, slot: &'a str) -> &'a str {
+        self.config.tools.get_argument_mapping(tool)
+            .and_then(|m| m.get(slot).map(|s| s.as_str()))
+            .unwrap_or(slot)
     }
 
     // ====== Domain Context / Vocabulary ======
@@ -1230,6 +1264,45 @@ impl ToolsDomainView {
     /// Get product name from brand config
     pub fn product_name(&self) -> &str {
         &self.config.brand.product_name
+    }
+
+    // ====== P16 FIX: Tool Response Templates ======
+
+    /// Get a response template for a tool and scenario
+    pub fn get_response_template(&self, tool: &str, scenario: &str, language: &str) -> Option<&str> {
+        self.config.tool_responses.get_template(tool, scenario, language)
+    }
+
+    /// Render a response template with variable substitution
+    pub fn render_response(
+        &self,
+        tool: &str,
+        scenario: &str,
+        language: &str,
+        vars: &HashMap<String, String>,
+    ) -> Option<String> {
+        self.config.tool_responses.render_template(tool, scenario, language, vars)
+    }
+
+    /// Check if response templates are configured for a tool
+    pub fn has_response_templates(&self, tool: &str) -> bool {
+        self.config.tool_responses.has_tool(tool)
+    }
+
+    /// Get rate description for a tier (e.g., "premium", "competitive")
+    pub fn get_rate_description(&self, tier: &str) -> &str {
+        self.config.tool_responses.get_rate_description(tier)
+    }
+
+    /// Build default template variables from brand config
+    pub fn default_template_vars(&self) -> HashMap<String, String> {
+        let mut vars = HashMap::new();
+        vars.insert("company_name".to_string(), self.config.brand.company_name.clone());
+        vars.insert("product_name".to_string(), self.config.brand.product_name.clone());
+        vars.insert("helpline".to_string(), self.config.brand.helpline.clone());
+        vars.insert("agent_name".to_string(), self.config.brand.agent_name.clone());
+        vars.insert("currency".to_string(), "₹".to_string());
+        vars
     }
 
     // ====== P16 FIX: Intent to Tool Resolution ======

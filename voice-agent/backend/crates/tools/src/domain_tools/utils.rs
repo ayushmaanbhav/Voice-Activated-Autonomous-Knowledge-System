@@ -1,47 +1,10 @@
-//! Gold Loan Utility Functions
+//! Financial Utility Functions for Domain Tools
 //!
-//! Financial calculation utilities for gold loan tools.
+//! Re-exports financial calculations from the core crate.
+//! This ensures a single source of truth for all financial calculations.
 
-/// P0 FIX: Calculate EMI using the standard amortization formula
-///
-/// EMI = P × r × (1 + r)^n / [(1 + r)^n - 1]
-///
-/// Where:
-/// - P = Principal loan amount
-/// - r = Monthly interest rate (annual_rate / 12 / 100)
-/// - n = Number of months (tenure)
-///
-/// Note: Gold loans often use simple interest schemes where only interest
-/// is paid monthly, but this function provides true EMI for accurate comparison.
-pub fn calculate_emi(principal: f64, annual_rate_percent: f64, tenure_months: i64) -> f64 {
-    if tenure_months <= 0 || principal <= 0.0 {
-        return 0.0;
-    }
-
-    let monthly_rate = annual_rate_percent / 100.0 / 12.0;
-
-    // Handle edge case of 0% interest
-    if monthly_rate <= 0.0 {
-        return principal / tenure_months as f64;
-    }
-
-    let n = tenure_months as f64;
-    let one_plus_r_n = (1.0 + monthly_rate).powf(n);
-
-    // EMI formula: P * r * (1+r)^n / [(1+r)^n - 1]
-    principal * monthly_rate * one_plus_r_n / (one_plus_r_n - 1.0)
-}
-
-/// Calculate total interest paid over the loan tenure
-pub fn calculate_total_interest(
-    principal: f64,
-    annual_rate_percent: f64,
-    tenure_months: i64,
-) -> f64 {
-    let emi = calculate_emi(principal, annual_rate_percent, tenure_months);
-    let total_paid = emi * tenure_months as f64;
-    total_paid - principal
-}
+// Re-export from core crate's financial module
+pub use voice_agent_core::financial::{calculate_emi, calculate_total_interest};
 
 #[cfg(test)]
 mod tests {

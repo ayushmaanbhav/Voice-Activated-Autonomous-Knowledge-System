@@ -1,0 +1,178 @@
+# Intent to Tool Mappings Configuration
+# P16 FIX: Replaces hardcoded intent-to-tool mappings in agent/tools.rs
+#
+# This config defines how detected intents map to tool invocations.
+# Domain-agnostic: the mapping structure is generic, values are domain-specific.
+#
+# The intent_to_tool section uses the intent name as the key, and all
+# aliases are flattened into separate entries pointing to the same config.
+
+# Intent-to-tool mappings
+# Format: intent_name -> {tool, required_slots, fallback_tool, aliases}
+# Aliases will be auto-expanded to create additional mappings
+intent_to_tool:
+  # Eligibility checking
+  eligibility_check:
+    tool: check_eligibility
+    required_slots:
+      - gold_weight  # asset_quantity in generic terms
+    aliases:
+      - eligibility_inquiry
+      - check_eligibility
+      - loan_eligibility
+      - am_i_eligible
+      - qualification_check
+
+  # Lender switching / balance transfer
+  switch_lender:
+    tool: calculate_savings
+    required_slots:
+      - current_lender  # current_provider in generic terms
+    aliases:
+      - balance_transfer
+      - switch_provider
+      - transfer_loan
+      - compare_rates
+      - savings_inquiry
+
+  # Branch/location finding
+  schedule_visit:
+    tool: find_locations
+    required_slots: []
+    aliases:
+      - find_branch
+      - branch_inquiry
+      - nearest_branch
+      - location_inquiry
+
+  # Lead capture
+  capture_lead:
+    tool: capture_lead
+    required_slots: []  # Any of customer_name or phone_number triggers this
+    aliases:
+      - interested
+      - callback_request
+      - contact_me
+      - follow_up
+
+  # Appointment scheduling
+  schedule_appointment:
+    tool: schedule_appointment
+    required_slots: []
+    fallback_tool: find_locations  # Use if slots not available
+    aliases:
+      - book_appointment
+      - visit_branch
+      - appointment_request
+      - meeting_request
+
+  # Price inquiry (asset pricing)
+  gold_price:
+    tool: get_price
+    required_slots: []
+    aliases:
+      - price_inquiry
+      - check_gold_price
+      - current_rate
+      - asset_price
+      - price_check
+
+  # Human escalation
+  escalate:
+    tool: escalate_to_human
+    required_slots: []
+    aliases:
+      - human_agent
+      - speak_to_person
+      - talk_to_human
+      - real_person
+      - transfer_to_agent
+      - speak_to_executive
+
+  # SMS information
+  send_sms:
+    tool: send_sms
+    required_slots: []
+    aliases:
+      - send_message
+      - text_me
+      - send_details
+      - sms_info
+      - whatsapp_info
+
+  # Document checklist
+  document_inquiry:
+    tool: get_document_checklist
+    required_slots: []
+    aliases:
+      - documents_needed
+      - what_documents
+      - kyc_requirements
+      - papers_required
+
+  # Competitor comparison
+  compare_providers:
+    tool: compare_lenders
+    required_slots: []
+    aliases:
+      - compare_lenders
+      - competitor_comparison
+      - rate_comparison
+      - which_is_better
+
+# Slot name aliases for normalization
+# Maps domain-specific slot names to generic slot names
+# Used when checking required_slots against available slots
+slot_aliases:
+  gold_weight: asset_quantity
+  gold_weight_grams: asset_quantity
+  weight: asset_quantity
+  gold_purity: asset_quality
+  purity: asset_quality
+  loan_amount: requested_amount
+  amount: requested_amount
+  current_lender: current_provider
+  lender: current_provider
+  city: location
+
+# Tool argument defaults
+# Values to use when a tool argument is not provided by slots
+tool_defaults:
+  check_eligibility:
+    collateral_variant: "22K"  # Default purity
+  calculate_savings:
+    current_interest_rate: 18.0  # Default NBFC rate
+    tenure_months: 12
+    loan_amount: 100000
+  find_locations:
+    city: "Mumbai"  # Default city
+  capture_lead:
+    interest_level: "Medium"
+
+# Tool argument name mappings
+# Maps DST slot names to tool parameter names
+argument_mappings:
+  check_eligibility:
+    asset_quantity: collateral_weight
+    gold_weight: collateral_weight
+    gold_weight_grams: collateral_weight
+    asset_quality: collateral_variant
+    gold_purity: collateral_variant
+    purity: collateral_variant
+  calculate_savings:
+    current_provider: current_lender
+    requested_amount: current_loan_amount
+    loan_amount: current_loan_amount
+    loan_tenure: remaining_tenure_months
+    tenure: remaining_tenure_months
+  find_locations:
+    location: city
+  capture_lead:
+    name: customer_name
+    phone: phone_number
+  schedule_appointment:
+    name: customer_name
+    phone: phone_number
+    date: preferred_date
+    time: preferred_time
+    branch: branch_id

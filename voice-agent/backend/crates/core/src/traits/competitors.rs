@@ -259,21 +259,14 @@ impl ConfigCompetitorAnalyzer {
         }
     }
 
-    /// Calculate EMI (helper)
+    /// Calculate EMI (uses shared implementation from crate::financial)
     fn calculate_emi(&self, principal: f64, annual_rate: f64, months: i64) -> f64 {
-        let monthly_rate = annual_rate / 100.0 / 12.0;
-        if monthly_rate <= 0.0 {
-            return principal / months as f64;
-        }
-        let n = months as i32;
-        let factor = (1.0 + monthly_rate).powi(n);
-        principal * monthly_rate * factor / (factor - 1.0)
+        crate::financial::calculate_emi(principal, annual_rate, months)
     }
 
-    /// Calculate total interest (helper)
+    /// Calculate total interest (uses shared implementation from crate::financial)
     fn calculate_total_interest(&self, principal: f64, annual_rate: f64, months: i64) -> f64 {
-        let emi = self.calculate_emi(principal, annual_rate, months);
-        (emi * months as f64) - principal
+        crate::financial::calculate_total_interest(principal, annual_rate, months)
     }
 }
 

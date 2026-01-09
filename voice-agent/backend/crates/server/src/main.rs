@@ -70,12 +70,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // P2 FIX: Wire audit logging for RBI compliance
                 let audit_log: Arc<dyn voice_agent_persistence::AuditLog> =
                     Arc::new(persistence.audit);
-                // P1-4 FIX: Wire SMS and GoldPrice services into tools
+                // P1-4 FIX: Wire SMS and AssetPrice services into tools
                 let sms_service: Arc<dyn voice_agent_persistence::SmsService> =
                     Arc::new(persistence.sms);
-                let gold_price_service: Arc<dyn voice_agent_persistence::GoldPriceService> =
-                    Arc::new(persistence.gold_price);
-                tracing::info!("SMS and GoldPrice services wired into tools");
+                // P16 FIX: Use generic AssetPriceService (GoldPriceService is an alias)
+                let gold_price_service: Arc<dyn voice_agent_persistence::AssetPriceService> =
+                    Arc::new(persistence.asset_price);
+                tracing::info!("SMS and AssetPrice services wired into tools");
                 // P12 FIX: Use new method that only accepts MasterDomainConfig
                 AppState::with_full_persistence(
                     config.clone(),

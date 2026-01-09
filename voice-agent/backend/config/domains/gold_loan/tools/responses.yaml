@@ -1,0 +1,188 @@
+# Tool Response Templates Configuration
+# P16 FIX: Replaces hardcoded response messages in tool implementations
+#
+# This config defines response templates used by tools.
+# Templates support variable substitution using {variable_name} syntax.
+# Domain-agnostic: template structure is generic, content is domain-specific.
+
+# Response templates by tool
+templates:
+  # Eligibility check responses
+  check_eligibility:
+    eligible:
+      en: "You are eligible for a {product_name} up to {currency}{max_amount} at {interest_rate}% interest!"
+      hi: "आप {currency}{max_amount} तक के {product_name} के लिए {interest_rate}% ब्याज पर पात्र हैं!"
+    additional_available:
+      en: "You can get an additional {currency}{available_amount} on your {collateral_type}."
+      hi: "आप अपने {collateral_type} पर अतिरिक्त {currency}{available_amount} प्राप्त कर सकते हैं।"
+    not_eligible:
+      en: "Based on your existing loan, no additional loan is available at this time."
+      hi: "आपके मौजूदा ऋण के आधार पर, इस समय कोई अतिरिक्त ऋण उपलब्ध नहीं है।"
+    high_value_eligible:
+      en: "Great news! As a high-value customer, you qualify for our premium rate of {premium_rate}% with a dedicated relationship manager."
+      hi: "बढ़िया खबर! एक उच्च-मूल्य ग्राहक के रूप में, आप {premium_rate}% की हमारी प्रीमियम दर के लिए समर्पित रिलेशनशिप मैनेजर के साथ योग्य हैं।"
+
+  # Savings calculator responses
+  calculate_savings:
+    savings_found:
+      en: "By switching to {company_name} at our {rate_description} rate of {our_rate}%, you can save {currency}{monthly_savings} per month on EMI (or {currency}{interest_savings} on interest-only) and {currency}{total_savings} total over the remaining {tenure_months} months!"
+      hi: "{company_name} में {our_rate}% की हमारी {rate_description} दर पर स्विच करके, आप EMI पर {currency}{monthly_savings} प्रति माह (या केवल ब्याज पर {currency}{interest_savings}) और शेष {tenure_months} महीनों में कुल {currency}{total_savings} बचा सकते हैं!"
+    minimal_savings:
+      en: "Your current rate of {current_rate}% is quite competitive. You would save {currency}{monthly_savings} per month by switching to {company_name}."
+      hi: "आपकी वर्तमान दर {current_rate}% काफी प्रतिस्पर्धी है। {company_name} में स्विच करके आप {currency}{monthly_savings} प्रति माह बचाएंगे।"
+    no_savings:
+      en: "Your current rate with {current_lender} is already competitive. However, {company_name} offers additional benefits like {features}."
+      hi: "{current_lender} के साथ आपकी वर्तमान दर पहले से प्रतिस्पर्धी है। हालांकि, {company_name} {features} जैसे अतिरिक्त लाभ प्रदान करता है।"
+
+  # Price inquiry responses
+  get_price:
+    single_variant:
+      en: "Current {variant_name} price is {currency}{price} per {unit}."
+      hi: "वर्तमान {variant_name} की कीमत {currency}{price} प्रति {unit} है।"
+    all_variants:
+      en: "Current prices - {tier_1_name}: {currency}{tier_1_price}/{unit}, {tier_2_name}: {currency}{tier_2_price}/{unit}, {tier_3_name}: {currency}{tier_3_price}/{unit}"
+      hi: "वर्तमान कीमतें - {tier_1_name}: {currency}{tier_1_price}/{unit}, {tier_2_name}: {currency}{tier_2_price}/{unit}, {tier_3_name}: {currency}{tier_3_price}/{unit}"
+    price_trend:
+      en: "{variant_name} price is {currency}{price} per {unit}, {trend_direction} {trend_percent}% from yesterday."
+      hi: "{variant_name} की कीमत {currency}{price} प्रति {unit} है, कल से {trend_percent}% {trend_direction}।"
+
+  # Branch finder responses
+  find_locations:
+    branches_found:
+      en: "Found {count} {company_name} branches near {location}. The nearest is {nearest_branch} ({distance} km away)."
+      hi: "{location} के पास {count} {company_name} शाखाएं मिलीं। निकटतम {nearest_branch} है ({distance} किमी दूर)।"
+    no_branches:
+      en: "No branches found in {location}. Would you like to check nearby areas or schedule a doorstep service?"
+      hi: "{location} में कोई शाखा नहीं मिली। क्या आप आस-पास के क्षेत्रों की जांच करना चाहेंगे या डोरस्टेप सेवा शेड्यूल करना चाहेंगे?"
+    doorstep_available:
+      en: "Great news! Doorstep service is available in {location}. Our executive can visit you at your convenience."
+      hi: "बढ़िया खबर! {location} में डोरस्टेप सेवा उपलब्ध है। हमारे कार्यकारी आपकी सुविधानुसार आपसे मिल सकते हैं।"
+
+  # Lead capture responses
+  capture_lead:
+    success:
+      en: "Thank you, {customer_name}! I've noted your details. Our team will contact you at {phone_number} shortly."
+      hi: "धन्यवाद, {customer_name}! मैंने आपका विवरण नोट कर लिया है। हमारी टीम जल्द ही {phone_number} पर आपसे संपर्क करेगी।"
+    callback_scheduled:
+      en: "I've scheduled a callback for you, {customer_name}. Our gold loan expert will call you within {callback_window}."
+      hi: "मैंने आपके लिए कॉलबैक शेड्यूल किया है, {customer_name}। हमारे गोल्ड लोन विशेषज्ञ {callback_window} के भीतर आपको कॉल करेंगे।"
+
+  # Appointment scheduling responses
+  schedule_appointment:
+    confirmed:
+      en: "Your appointment at {branch_name} is confirmed for {date} at {time}. Please bring your gold and ID proof."
+      hi: "{branch_name} में आपकी अपॉइंटमेंट {date} को {time} के लिए कन्फर्म है। कृपया अपना सोना और आईडी प्रूफ लेकर आएं।"
+    pending_confirmation:
+      en: "I've requested an appointment at {branch_name} for {date}. You'll receive a confirmation SMS shortly."
+      hi: "मैंने {branch_name} में {date} के लिए अपॉइंटमेंट का अनुरोध किया है। आपको जल्द ही पुष्टि SMS प्राप्त होगा।"
+
+  # Competitor comparison responses
+  compare_lenders:
+    comparison_result:
+      en: "For a loan of {currency}{loan_amount}, {company_name} offers {our_rate}% p.a. with monthly interest of {currency}{our_monthly}. {comparison_summary}"
+      hi: "{currency}{loan_amount} के ऋण के लिए, {company_name} {currency}{our_monthly} की मासिक ब्याज के साथ {our_rate}% प्रति वर्ष प्रदान करता है। {comparison_summary}"
+    rate_advantage:
+      en: "{rate_diff}% lower rate than {competitor_name} (saving {currency}{monthly_saving}/month)"
+      hi: "{competitor_name} की तुलना में {rate_diff}% कम दर ({currency}{monthly_saving}/माह की बचत)"
+
+  # Document checklist responses
+  get_document_checklist:
+    checklist:
+      en: "For {service_type}, you'll need: {document_list}. {additional_info}"
+      hi: "{service_type} के लिए, आपको चाहिए: {document_list}। {additional_info}"
+
+  # SMS responses
+  send_sms:
+    sent:
+      en: "I've sent the {message_type} details to {phone_number}. Please check your messages."
+      hi: "मैंने {phone_number} पर {message_type} विवरण भेज दिया है। कृपया अपने संदेश देखें।"
+
+  # Escalation responses
+  escalate_to_human:
+    transferring:
+      en: "I'm connecting you with a {company_name} gold loan specialist. Please hold for a moment."
+      hi: "मैं आपको {company_name} के गोल्ड लोन विशेषज्ञ से जोड़ रहा हूं। कृपया एक क्षण प्रतीक्षा करें।"
+    callback_offered:
+      en: "Our gold loan experts are currently busy. Would you like a callback within {callback_window}?"
+      hi: "हमारे गोल्ड लोन विशेषज्ञ वर्तमान में व्यस्त हैं। क्या आप {callback_window} के भीतर कॉलबैक चाहेंगे?"
+
+# Variable definitions (for documentation and validation)
+variables:
+  # Currency and amounts
+  currency:
+    default: "₹"
+    description: "Currency symbol"
+  max_amount:
+    type: number
+    format: ",.0f"
+    description: "Maximum eligible amount"
+  available_amount:
+    type: number
+    format: ",.0f"
+  monthly_savings:
+    type: number
+    format: ",.0f"
+  total_savings:
+    type: number
+    format: ",.0f"
+  price:
+    type: number
+    format: ",.0f"
+
+  # Rates and percentages
+  interest_rate:
+    type: number
+    format: ".1f"
+  our_rate:
+    type: number
+    format: ".1f"
+  premium_rate:
+    type: number
+    format: ".1f"
+
+  # Brand and product
+  company_name:
+    source: "brand.company_name"
+    default: "Kotak Mahindra Bank"
+  product_name:
+    source: "brand.product_name"
+    default: "Gold Loan"
+
+  # Collateral type (domain-specific)
+  collateral_type:
+    default: "gold"
+    description: "Type of collateral (gold, vehicle, property)"
+
+  # Unit for pricing
+  unit:
+    default: "gram"
+    description: "Unit of measurement"
+
+  # Variant names (domain-specific)
+  variant_name:
+    default: "gold"
+  tier_1_name:
+    default: "24K"
+  tier_2_name:
+    default: "22K"
+  tier_3_name:
+    default: "18K"
+
+# Rate tier descriptions
+rate_descriptions:
+  tier_1: "premium"
+  tier_2: "competitive"
+  tier_3: "standard"
+  default: "competitive"
+
+# Trend direction labels
+trend_labels:
+  up:
+    en: "up"
+    hi: "ऊपर"
+  down:
+    en: "down"
+    hi: "नीचे"
+  stable:
+    en: "stable"
+    hi: "स्थिर"

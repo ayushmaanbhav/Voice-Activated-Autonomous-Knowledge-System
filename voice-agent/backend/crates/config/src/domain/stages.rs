@@ -18,6 +18,10 @@ pub struct StagesConfig {
     /// Transition triggers - patterns that suggest moving to a stage
     #[serde(default)]
     pub transition_triggers: HashMap<String, TransitionTrigger>,
+    /// P16 FIX: Intent-based stage transitions
+    /// Maps intent → current_stage → target_stage (or IntentTransition)
+    #[serde(default)]
+    pub intent_transitions: HashMap<String, HashMap<String, IntentTransitionTarget>>,
 }
 
 fn default_initial_stage() -> String {
@@ -30,8 +34,48 @@ impl Default for StagesConfig {
             initial_stage: default_initial_stage(),
             stages: HashMap::new(),
             transition_triggers: HashMap::new(),
+            intent_transitions: HashMap::new(),
         }
     }
+}
+
+/// P16 FIX: Target for intent-based transition
+/// Can be either a simple stage name or a complex transition with conditions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum IntentTransitionTarget {
+    /// Simple target stage name
+    Simple(String),
+    /// Complex transition with conditions
+    Complex(IntentTransition),
+}
+
+impl IntentTransitionTarget {
+    /// Get the target stage name
+    pub fn target(&self) -> &str {
+        match self {
+            Self::Simple(s) => s.as_str(),
+            Self::Complex(t) => t.target.as_str(),
+        }
+    }
+
+    /// Get minimum turns required (0 if not specified)
+    pub fn min_turns(&self) -> usize {
+        match self {
+            Self::Simple(_) => 0,
+            Self::Complex(t) => t.min_turns,
+        }
+    }
+}
+
+/// Complex intent transition with conditions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntentTransition {
+    /// Target stage
+    pub target: String,
+    /// Minimum turns in current stage before transition allowed
+    #[serde(default)]
+    pub min_turns: usize,
 }
 
 impl StagesConfig {
@@ -107,6 +151,41 @@ impl StagesConfig {
             .get(stage_id)
             .map(|s| s.rag_context_fraction)
             .unwrap_or(0.0)
+    }
+
+    /// P16 FIX: Get intent-based transition target
+    ///
+    /// Returns the target stage for a given intent and current stage, if defined.
+    /// Also returns the minimum turns required before transition is allowed.
+    pub fn get_intent_transition(
+        &self,
+        intent: &str,
+        current_stage: &str,
+    ) -> Option<(&str, usize)> {
+        self.intent_transitions
+            .get(intent)
+            .and_then(|stage_map| stage_map.get(current_stage))
+            .map(|target| (target.target(), target.min_turns()))
+    }
+
+    /// P16 FIX: Check if an intent transition is valid
+    ///
+    /// Returns true if the intent can trigger a transition from current_stage,
+    /// and the min_turns requirement is satisfied.
+    pub fn can_transition_on_intent(
+        &self,
+        intent: &str,
+        current_stage: &str,
+        current_turns: usize,
+    ) -> Option<&str> {
+        self.get_intent_transition(intent, current_stage)
+            .and_then(|(target, min_turns)| {
+                if current_turns >= min_turns {
+                    Some(target)
+                } else {
+                    None
+                }
+            })
     }
 }
 
@@ -268,5 +347,40 @@ transition_triggers:
         let trigger = config.get_trigger("discovery").unwrap();
         assert_eq!(trigger.intents, vec!["loan_inquiry"]);
         assert_eq!(trigger.patterns.len(), 1);
+    }
+
+    #[test]
+    fn test_intent_transitions() {
+        let yaml = r#"
+intent_transitions:
+  greeting:
+    greeting:
+      target: discovery
+      min_turns: 1
+  loan_inquiry:
+    greeting: discovery
+    discovery: qualification
+  affirmative:
+    greeting: discovery
+    discovery: qualification
+"#;
+        let config: StagesConfig = serde_yaml::from_str(yaml).unwrap();
+
+        // Test simple transition
+        let (target, min_turns) = config.get_intent_transition("loan_inquiry", "greeting").unwrap();
+        assert_eq!(target, "discovery");
+        assert_eq!(min_turns, 0);
+
+        // Test complex transition with min_turns
+        let (target, min_turns) = config.get_intent_transition("greeting", "greeting").unwrap();
+        assert_eq!(target, "discovery");
+        assert_eq!(min_turns, 1);
+
+        // Test can_transition_on_intent with min_turns check
+        assert!(config.can_transition_on_intent("greeting", "greeting", 0).is_none());
+        assert_eq!(config.can_transition_on_intent("greeting", "greeting", 1), Some("discovery"));
+
+        // Test non-existent transition
+        assert!(config.get_intent_transition("loan_inquiry", "closing").is_none());
     }
 }

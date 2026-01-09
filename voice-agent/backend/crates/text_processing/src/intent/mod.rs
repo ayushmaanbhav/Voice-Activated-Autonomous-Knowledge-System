@@ -126,6 +126,100 @@ impl IntentDetector {
         detector
     }
 
+    /// P16 FIX: Create intent detector with competitor patterns from config
+    ///
+    /// This is the preferred constructor for domain-agnostic operation.
+    /// Loads competitor patterns from config, replacing hardcoded defaults.
+    ///
+    /// # Arguments
+    /// * `competitors` - Vec of (id, display_name, pattern) from config
+    ///
+    /// # Example
+    /// ```ignore
+    /// let patterns = domain_config.competitors.to_intent_patterns();
+    /// let refs: Vec<(&str, &str, &str)> = patterns.iter()
+    ///     .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
+    ///     .collect();
+    /// let detector = IntentDetector::with_competitor_patterns(refs);
+    /// ```
+    pub fn with_competitor_patterns(competitors: Vec<(&str, &str, &str)>) -> Self {
+        let mut detector = Self::new();
+        detector.add_competitor_patterns(competitors);
+        detector
+    }
+
+    /// Add competitor patterns from domain config
+    ///
+    /// This allows loading competitor detection patterns from config rather than using
+    /// hardcoded values. Call this after construction to override default patterns.
+    ///
+    /// # Arguments
+    /// * `competitors` - Vec of (id, display_name, regex_pattern) tuples
+    ///
+    /// # Example
+    /// ```ignore
+    /// detector.add_competitor_patterns(vec![
+    ///     ("muthoot", "Muthoot Finance", r"(?i)\b(muthoot)\b"),
+    ///     ("manappuram", "Manappuram", r"(?i)\b(manappuram)\b"),
+    /// ]);
+    /// ```
+    pub fn add_competitor_patterns(&mut self, competitors: Vec<(&str, &str, &str)>) {
+        let mut patterns = Vec::new();
+        for (id, _display_name, pattern) in competitors {
+            if let Ok(regex) = Regex::new(pattern) {
+                patterns.push(CompiledSlotPattern {
+                    name: id.to_string(),
+                    regex,
+                    slot_type: SlotType::Text,
+                    multiplier: None,
+                });
+            } else {
+                tracing::warn!("Failed to compile competitor pattern for {}: {}", id, pattern);
+            }
+        }
+        if !patterns.is_empty() {
+            self.compiled_patterns.insert("current_lender".to_string(), patterns);
+            tracing::debug!("Added {} competitor patterns from config", self.compiled_patterns.get("current_lender").map(|p| p.len()).unwrap_or(0));
+        }
+    }
+
+    /// Add collateral variant patterns from domain config
+    ///
+    /// This allows loading variant patterns (e.g., purity grades) from config.
+    ///
+    /// # Arguments
+    /// * `variants` - Vec of (variant_id, regex_pattern) tuples
+    pub fn add_variant_patterns(&mut self, variants: Vec<(&str, &str)>) {
+        let mut valid_variants = Vec::new();
+        for (id, pattern) in &variants {
+            if let Ok(regex) = Regex::new(pattern) {
+                valid_variants.push(id.to_uppercase());
+                // We'll use a combined pattern for now
+                let _ = regex; // Pattern validated
+            }
+        }
+
+        if !valid_variants.is_empty() {
+            // Create combined pattern
+            let pattern_str = variants.iter()
+                .map(|(_, p)| format!("({})", p))
+                .collect::<Vec<_>>()
+                .join("|");
+
+            if let Ok(regex) = Regex::new(&format!("(?i){}", pattern_str)) {
+                self.compiled_patterns.insert(
+                    "collateral_variant".to_string(),
+                    vec![CompiledSlotPattern {
+                        name: "variant".to_string(),
+                        regex,
+                        slot_type: SlotType::Enum(valid_variants),
+                        multiplier: None,
+                    }],
+                );
+            }
+        }
+    }
+
     /// Add additional intents to the detector
     pub fn add_intents(&self, new_intents: Vec<Intent>) {
         let mut intents = self.intents.write();
@@ -571,22 +665,26 @@ impl IntentDetector {
         self.compiled_patterns
             .insert("phone_number".to_string(), phone_patterns);
 
-        // Current lender patterns
+        // Current lender patterns (DEFAULT - override with add_competitor_patterns())
+        //
+        // NOTE: These are example patterns. For production use, load competitor patterns
+        // from domain config using add_competitor_patterns() after construction.
+        // These defaults are provided for backwards compatibility only.
         let lender_patterns = vec![
             CompiledSlotPattern {
-                name: "muthoot".to_string(),
+                name: "competitor_1".to_string(),
                 regex: Regex::new(r"(?i)\b(muthoot)\b").unwrap(),
                 slot_type: SlotType::Text,
                 multiplier: None,
             },
             CompiledSlotPattern {
-                name: "manappuram".to_string(),
+                name: "competitor_2".to_string(),
                 regex: Regex::new(r"(?i)\b(manappuram)\b").unwrap(),
                 slot_type: SlotType::Text,
                 multiplier: None,
             },
             CompiledSlotPattern {
-                name: "iifl".to_string(),
+                name: "competitor_3".to_string(),
                 regex: Regex::new(r"(?i)\b(iifl|ii\s*fl)\b").unwrap(),
                 slot_type: SlotType::Text,
                 multiplier: None,
@@ -595,15 +693,26 @@ impl IntentDetector {
         self.compiled_patterns
             .insert("current_lender".to_string(), lender_patterns);
 
-        // Gold purity patterns
-        let purity_patterns = vec![CompiledSlotPattern {
+        // Collateral variant patterns (DEFAULT - override with add_variant_patterns())
+        //
+        // NOTE: These are example patterns for gold purity. For other domains,
+        // override using add_variant_patterns() with domain-specific variants.
+        let variant_patterns = vec![CompiledSlotPattern {
             name: "karat".to_string(),
             regex: Regex::new(r"(?i)(22|24|18)\s*(?:k|karat|carat|kt)").unwrap(),
             slot_type: SlotType::Enum(vec!["18K".into(), "22K".into(), "24K".into()]),
             multiplier: None,
         }];
         self.compiled_patterns
-            .insert("gold_purity".to_string(), purity_patterns);
+            .insert("collateral_variant".to_string(), variant_patterns);
+        // Legacy alias for backwards compatibility
+        self.compiled_patterns
+            .insert("gold_purity".to_string(), vec![CompiledSlotPattern {
+                name: "karat".to_string(),
+                regex: Regex::new(r"(?i)(22|24|18)\s*(?:k|karat|carat|kt)").unwrap(),
+                slot_type: SlotType::Enum(vec!["18K".into(), "22K".into(), "24K".into()]),
+                multiplier: None,
+            }]);
 
         // Location/City patterns
         let location_patterns = vec![CompiledSlotPattern {
@@ -1013,16 +1122,24 @@ impl IntentDetector {
                                 converted.replace(",", "")
                             },
                             SlotType::Text => {
-                                // Capitalize lender names
-                                let s = raw_value.to_lowercase();
-                                if s.contains("muthoot") {
-                                    "Muthoot".to_string()
-                                } else if s.contains("manappuram") {
-                                    "Manappuram".to_string()
-                                } else if s.contains("iifl") {
-                                    "IIFL".to_string()
-                                } else {
+                                // Capitalize first letter for proper nouns (competitor names, etc.)
+                                // NOTE: Specific capitalization rules should come from domain config
+                                let trimmed = raw_value.trim();
+                                if trimmed.is_empty() {
                                     raw_value.to_string()
+                                } else {
+                                    // Title case: capitalize first letter of each word
+                                    trimmed
+                                        .split_whitespace()
+                                        .map(|word| {
+                                            let mut chars = word.chars();
+                                            match chars.next() {
+                                                None => String::new(),
+                                                Some(c) => c.to_uppercase().chain(chars).collect(),
+                                            }
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join(" ")
                                 }
                             },
                             SlotType::Enum(_) => {

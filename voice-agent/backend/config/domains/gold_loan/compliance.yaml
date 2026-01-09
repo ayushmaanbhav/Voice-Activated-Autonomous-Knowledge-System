@@ -1,0 +1,136 @@
+# Compliance Rules Configuration
+# P16 FIX: Config-driven compliance rules
+#
+# Defines regulatory compliance rules for the voice agent.
+# Domain-specific but loaded from config for easy modification.
+
+version: "1.0.0"
+
+# Rate validation rules
+rate_rules:
+  # Minimum allowed interest rate (%)
+  min_rate: 7.0
+  # Maximum allowed interest rate (%)
+  max_rate: 24.0
+  # Decimal precision for rate display
+  precision: 2
+
+# Forbidden phrases - triggers critical violation if detected in output
+# These should NEVER appear in agent responses
+forbidden_phrases:
+  # False guarantees
+  - "guaranteed approval"
+  - "100% approval"
+  - "instant approval guaranteed"
+  - "no rejection"
+  # Misleading claims
+  - "zero interest"
+  - "interest free"
+  - "no interest"
+  - "free loan"
+  # Regulatory violations
+  - "no documentation needed"
+  - "no KYC required"
+  - "bypass"
+  - "avoid tax"
+  # Competitor disparagement
+  - "fraud"
+  - "scam"
+  - "cheating"
+  - "loot"
+  - "steal"
+  # Hindi forbidden phrases
+  - "guarantee"
+  - "pakka approval"
+  - "bina byaj"
+  - "dhoka"
+  - "fraud company"
+
+# Claims that require disclaimers
+claims_requiring_disclaimer:
+  - pattern: "(?i)(lowest|best|cheapest)\\s+(rate|interest)"
+    disclaimer: "Subject to eligibility and gold valuation."
+    description: "Superlative claims about rates"
+
+  - pattern: "(?i)save\\s+(up\\s+to\\s+)?\\d+%?"
+    disclaimer: "Savings calculated based on typical NBFC rates."
+    description: "Savings claims"
+
+  - pattern: "(?i)(same|instant)\\s+day\\s+(disbursement|loan)"
+    disclaimer: "Subject to documentation completion and branch working hours."
+    description: "Speed claims"
+
+  - pattern: "(?i)no\\s+(hidden|extra)\\s+(charges?|fees?)"
+    disclaimer: "Standard processing and valuation charges apply."
+    description: "Fee transparency claims"
+
+  - pattern: "(?i)(highest|maximum|up\\s+to)\\s+\\d+%?\\s*(ltv|loan)"
+    disclaimer: "LTV subject to gold purity and current market rates."
+    description: "LTV claims"
+
+# Required disclosures based on context
+required_disclosures:
+  - trigger_pattern: "(?i)(loan|interest|emi)"
+    disclosure: ""  # Only add on explicit loan discussion
+    position: "end"
+
+  - trigger_pattern: "(?i)(insurance|coverage)"
+    disclosure: "Gold insurance is provided free of cost with our gold loan."
+    position: "end"
+
+# Competitor mention rules
+competitor_rules:
+  # List of known competitors (loaded from competitors.yaml in production)
+  competitors:
+    # NBFCs
+    - "Muthoot"
+    - "Manappuram"
+    - "IIFL"
+    # Banks
+    - "HDFC"
+    - "SBI"
+    - "ICICI"
+    - "Axis"
+    - "Federal"
+  # Whether disparaging competitors is allowed
+  allow_disparagement: false
+  # Whether factual comparison is allowed
+  allow_comparison: true
+
+# Regulatory body references
+regulatory:
+  primary_regulator: "RBI"
+  regulator_full_name: "Reserve Bank of India"
+  license_type: "Scheduled Commercial Bank"
+  compliance_statement: "Regulated by Reserve Bank of India"
+
+# Language-specific compliance
+language_rules:
+  en:
+    disclaimer_prefix: "Note: "
+    terms_reference: "Terms and conditions apply."
+  hi:
+    disclaimer_prefix: "नोट: "
+    terms_reference: "नियम और शर्तें लागू।"
+
+# Severity levels for violations
+severity_levels:
+  critical:
+    - forbidden_phrases
+    - rate_out_of_bounds
+    - competitor_disparagement
+  warning:
+    - missing_disclaimer
+    - unverified_claim
+  info:
+    - competitor_mention
+    - rate_comparison
+
+# Auto-correction rules
+auto_corrections:
+  # Replace forbidden phrases with acceptable alternatives
+  replacements:
+    "guaranteed approval": "high approval rate"
+    "100% approval": "quick processing"
+    "zero interest": "competitive interest rates"
+    "no documentation": "minimal documentation"

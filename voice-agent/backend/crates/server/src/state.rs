@@ -244,12 +244,13 @@ impl AppState {
     /// gold price queries to ScyllaDB.
     ///
     /// All business config (rates, LTV, etc.) now comes from ToolsDomainView.
+    /// P16 FIX: Accept AssetPriceService (generic) instead of GoldPriceService
     pub fn with_full_persistence(
         config: Settings,
         store: Arc<dyn SessionStore>,
         master_domain_config: Arc<MasterDomainConfig>,
         sms_service: Arc<dyn voice_agent_persistence::SmsService>,
-        gold_price_service: Arc<dyn voice_agent_persistence::GoldPriceService>,
+        gold_price_service: Arc<dyn voice_agent_persistence::AssetPriceService>,
     ) -> Self {
         // P16 FIX: Use config-driven phonetic corrector
         let (text_processing, text_simplifier, phonetic_corrector, translator) = Self::create_text_processing_with_domain(&master_domain_config);
